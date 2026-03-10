@@ -331,67 +331,87 @@ let state = {
   apiKey: localStorage.getItem('gemini_api_key') || '',
 };
 
-/* Gemini API helper */
-async function geminiCall(systemPrompt, parts, history=[]) {
+/* ══════════════════════════════════
+   GEMINI API
+═══════════════════════════════════ */
+
+// Compress image to max 1MB before sending to Gemini
+async function compressImage(base64, mimeType) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      const MAX = 1200;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const compressed = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+      resolve({ base64: compressed, mimeType: 'image/jpeg' });
+    };
+    img.onerror = () => resolve({ base64, mimeType });
+    img.src = 'data:' + mimeType + ';base64,' + base64;
+  });
+}
+
+async function callGemini(base64, mimeType, prompt) {
   const key = state.apiKey;
-  if(!key) throw new Error('NO_KEY');
-  // Use gemini-1.5-flash with generateContent
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-
-  // Build contents array — inject system prompt as first user turn for reliability
-  const contents = [];
-  if(history.length === 0) {
-    // First turn: prepend system instructions to the parts
-    contents.push({
+  if (!key) throw new Error('NO_KEY');
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + key;
+  const body = {
+    contents: [{
       role: 'user',
-      parts: [{text: '[INSTRUCTIONS]\n' + systemPrompt + '\n[/INSTRUCTIONS]\n\n'}, ...parts]
-    });
-  } else {
-    // Multi-turn chat: put system in first user message
-    const firstParts = [{text: '[INSTRUCTIONS]\n' + systemPrompt + '\n[/INSTRUCTIONS]\n\n' + history[0].content}];
-    contents.push({role: 'user', parts: firstParts});
-    for(let i = 1; i < history.length; i++) {
-      contents.push({
-        role: history[i].role === 'assistant' ? 'model' : 'user',
-        parts: [{text: history[i].content}]
-      });
-    }
-    contents.push({role: 'user', parts});
-  }
-
+      parts: [
+        { inline_data: { mime_type: mimeType, data: base64 } },
+        { text: prompt }
+      ]
+    }],
+    generationConfig: { maxOutputTokens: 2048, temperature: 0.1 }
+  };
   const res = await fetch(url, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      contents,
-      generationConfig: {maxOutputTokens: 2048, temperature: 0.1}
-    })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   });
-
   const data = await res.json();
-
-  // Surface Gemini errors clearly
-  if(data.error) {
-    const msg = data.error.message || JSON.stringify(data.error);
-    throw new Error('Gemini: ' + msg);
-  }
-
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if(!text) throw new Error('Gemini returned empty response. Check your API key.');
+  if (!text) throw new Error('Empty response from Gemini. Key may be invalid.');
   return text;
 }
 
-/* Extract JSON robustly from Gemini response */
+async function callGeminiChat(messages, systemContext) {
+  const key = state.apiKey;
+  if (!key) throw new Error('NO_KEY');
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + key;
+  // Build contents - alternate user/model
+  const contents = [];
+  messages.forEach((m, i) => {
+    contents.push({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: (i === 0 && m.role === 'user') ? (systemContext + '\n\n' + m.content) : m.content }]
+    });
+  });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1024, temperature: 0.3 } })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, no response.';
+}
+
 function extractJSON(raw) {
-  // Try direct parse first
-  try { return JSON.parse(raw.trim()); } catch(e){}
-  // Strip markdown code fences
-  const stripped = raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
-  try { return JSON.parse(stripped); } catch(e){}
-  // Find first { ... } block
-  const match = raw.match(/\{[\s\S]*\}/);
-  if(match) { try { return JSON.parse(match[0]); } catch(e){} }
-  throw new Error('Could not parse JSON from response');
+  try { return JSON.parse(raw.trim()); } catch(e) {}
+  const stripped = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  try { return JSON.parse(stripped); } catch(e) {}
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch(e) {} }
+  throw new Error('Could not parse response as JSON');
 }
 
 function saveApiKey(k) {
@@ -494,62 +514,70 @@ function handleFile(f) {
    ANALYSIS
 ══════════════════════════════════════════ */
 async function analyze() {
-  if(!state.file) return;
-  if(!state.apiKey){ renderAnalyzeTab(); setTimeout(()=>showError('analyze','⚠️ Please enter your Gemini API key first (see the yellow box above).'),50); return; }
+  if (!state.file) return;
+  if (!state.apiKey) {
+    renderAnalyzeTab();
+    setTimeout(() => showError('analyze', 'Please enter your Gemini API key first (yellow box on home screen).'), 50);
+    return;
+  }
   renderLoading();
 
-  const filePart = {inline_data:{mime_type: state.file.mimeType, data: state.file.base64}};
-
   try {
-    const systemPrompt = `You are a medical document analyzer. The user will send you a medical bill, prescription, or discharge summary.
-Your task: Extract ALL medicine and health information and return ONLY a single valid JSON object.
+    // Compress image for faster/reliable API call
+    let b64 = state.file.base64;
+    let mime = state.file.mimeType;
+    if (state.file.type === 'image') {
+      const compressed = await compressImage(b64, mime);
+      b64 = compressed.base64;
+      mime = compressed.mimeType;
+    }
 
-Return this exact JSON structure with real values filled in (no placeholders):
-{"patient_name":null,"doctor_name":null,"hospital":null,"date":null,"diagnosis":null,"medicines":[{"name":"MedicineName","generic_name":null,"category":"e.g. Antibiotic","purpose":"what it treats","dosage":"e.g. 500mg","frequency":"e.g. Twice daily","duration":null,"form":"e.g. Tablet","timing":["Morning - 8:00 AM","Night - 9:00 PM"],"instructions":"e.g. Take after food","warnings":[]}],"general_instructions":null,"follow_up":null,"total_amount":null}
+    const prompt = `You are a medical document analyzer. Look at this medical bill or prescription image carefully.
+
+Extract ALL medicines and health information. Return ONLY a valid JSON object - no markdown, no explanation, just the raw JSON:
+
+{"patient_name":null,"doctor_name":null,"hospital":null,"date":null,"diagnosis":null,"medicines":[{"name":"MedicineName","generic_name":null,"category":"Antibiotic","purpose":"treats infection","dosage":"500mg","frequency":"Twice daily","duration":"5 days","form":"Tablet","timing":["Morning - 8:00 AM","Night - 9:00 PM"],"instructions":"Take after food","warnings":[]}],"general_instructions":null,"follow_up":null,"total_amount":null}
 
 Rules:
-- Return ONLY the JSON. No explanations, no markdown, no code fences.
-- Extract every single medicine listed.
-- If timing is not specified, suggest based on frequency (Once daily = Morning 8AM, Twice = Morning + Night, Three times = Morning/Afternoon/Night).
-- If it is not a medical document at all, return: {"error":"Not a medical document"}`;
+- Return ONLY the JSON object, nothing else
+- Extract every single medicine you can see
+- If timing not stated, suggest based on frequency
+- If not a medical document: {"error":"Not a medical document"}`;
 
-    const raw = await geminiCall(systemPrompt, [
-      filePart,
-      {text: 'Analyze this medical document. Return only the JSON object.'}
-    ]);
-
+    const raw = await callGemini(b64, mime, prompt);
     const parsed = extractJSON(raw);
 
-    if(parsed.error) {
+    if (parsed.error) {
       state.file = null;
       renderAnalyzeTab();
-      setTimeout(()=>showError('upload', parsed.error), 50);
+      setTimeout(() => showError('upload', parsed.error), 50);
       return;
     }
 
     state.result = parsed;
-    const diagText = parsed.diagnosis ? ' for **' + parsed.diagnosis + '**' : '';
-    state.msgs = [{role:'assistant', content:'Hi! I analyzed your ' + (state.file.type==='pdf'?'PDF':'medical bill') + '. Found ' + (parsed.medicines?.length||0) + ' medicine(s)' + diagText + '. Ask me anything about your medicines! Reminders tab is available too.'}];
+    const medCount = parsed.medicines ? parsed.medicines.length : 0;
+    const diagPart = parsed.diagnosis ? ' for ' + parsed.diagnosis : '';
+    state.msgs = [{ role: 'assistant', content: 'Hi! Analyzed your ' + (state.file.type === 'pdf' ? 'PDF' : 'medical bill') + '. Found ' + medCount + ' medicine(s)' + diagPart + '. Ask me anything about your medicines! Reminders tab is also available.' }];
+
     const r = {};
-    (parsed.medicines||[]).forEach(m => { r[m.name] = false; });
+    (parsed.medicines || []).forEach(m => { r[m.name] = false; });
     state.reminders = r;
+
     document.getElementById('nav-badge').style.display = '';
-    document.getElementById('nav-badge').textContent = `${parsed.medicines?.length||0} meds`;
+    document.getElementById('nav-badge').textContent = medCount + ' meds';
     document.getElementById('tabbar').style.display = 'flex';
     switchTab('analyze');
 
-  } catch(e) {
+  } catch (e) {
     console.error('Analyze error:', e);
     renderAnalyzeTab();
-    // Show actual error so user knows what's wrong
-    const msg = e.message === 'NO_KEY'
-      ? 'Please enter your Gemini API key first.'
-      : e.message.includes('API_KEY_INVALID') || e.message.includes('API key')
-        ? '❌ Invalid API key. Please check your Gemini key and try again.'
-        : e.message.includes('quota') || e.message.includes('QUOTA')
-          ? '❌ API quota exceeded. Try again later.'
-          : '❌ ' + (e.message || 'Unknown error. Please try again.');
-    setTimeout(()=>showError('analyze', msg), 50);
+    let msg;
+    if (e.message === 'NO_KEY') msg = 'No API key. Please enter your Gemini key first.';
+    else if (e.message.toLowerCase().includes('api key') || e.message.includes('API_KEY')) msg = 'Invalid API key. Check your Gemini key at aistudio.google.com';
+    else if (e.message.toLowerCase().includes('quota') || e.message.includes('429')) msg = 'Quota exceeded. Wait a minute and try again.';
+    else if (e.message.toLowerCase().includes('network') || e.message.includes('fetch')) msg = 'Network error. Check your internet connection.';
+    else msg = 'Error: ' + e.message;
+    setTimeout(() => showError('analyze', msg), 50);
   }
 }
 
@@ -603,16 +631,12 @@ async function sendChat(override) {
     : '';
 
   try {
-    const allMsgs = state.msgs; // includes the user msg we just pushed
-    const sysPrompt = `You are a friendly, knowledgeable medical assistant. Answer questions about the user's medicines and medical bill clearly in simple language. Be concise but helpful. Always remind users to consult their doctor for personalized advice. ${ctx}`;
-    // Pass all previous messages as history, current message as the parts
-    const history = allMsgs.slice(0, -1);
-    const lastMsg = allMsgs[allMsgs.length - 1];
-    const reply = await geminiCall(sysPrompt, [{text: lastMsg.content}], history);
-    state.msgs.push({role:'assistant', content: reply || 'Sorry, I could not process that. Please try again.'});
+    const sysCtx = 'You are a friendly medical assistant. Answer questions about medicines clearly and simply. Always remind users to consult their doctor. ' + ctx;
+    const reply = await callGeminiChat(state.msgs, sysCtx);
+    state.msgs.push({ role: 'assistant', content: reply });
   } catch(e) {
-    if(e.message==='NO_KEY') state.msgs.push({role:'assistant',content:'⚠️ Please set your Gemini API key first.'});
-    else state.msgs.push({role:'assistant',content:'❌ Error: ' + (e.message||'Something went wrong. Please try again.')});
+    const errMsg = e.message === 'NO_KEY' ? 'Please set your Gemini API key first.' : 'Error: ' + e.message;
+    state.msgs.push({ role: 'assistant', content: errMsg });
   }
   renderChat(false);
 }
