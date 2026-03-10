@@ -335,24 +335,63 @@ let state = {
 async function geminiCall(systemPrompt, parts, history=[]) {
   const key = state.apiKey;
   if(!key) throw new Error('NO_KEY');
+  // Use gemini-1.5-flash with generateContent
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+
+  // Build contents array — inject system prompt as first user turn for reliability
   const contents = [];
-  history.forEach(m => contents.push({
-    role: m.role==='assistant'?'model':'user',
-    parts:[{text:m.content}]
-  }));
-  contents.push({role:'user', parts});
+  if(history.length === 0) {
+    // First turn: prepend system instructions to the parts
+    contents.push({
+      role: 'user',
+      parts: [{text: '[INSTRUCTIONS]\n' + systemPrompt + '\n[/INSTRUCTIONS]\n\n'}, ...parts]
+    });
+  } else {
+    // Multi-turn chat: put system in first user message
+    const firstParts = [{text: '[INSTRUCTIONS]\n' + systemPrompt + '\n[/INSTRUCTIONS]\n\n' + history[0].content}];
+    contents.push({role: 'user', parts: firstParts});
+    for(let i = 1; i < history.length; i++) {
+      contents.push({
+        role: history[i].role === 'assistant' ? 'model' : 'user',
+        parts: [{text: history[i].content}]
+      });
+    }
+    contents.push({role: 'user', parts});
+  }
+
   const res = await fetch(url, {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      system_instruction:{parts:[{text:systemPrompt}]},
       contents,
-      generationConfig:{maxOutputTokens:2000, temperature:0.2}
+      generationConfig: {maxOutputTokens: 2048, temperature: 0.1}
     })
   });
+
   const data = await res.json();
-  if(data.error) throw new Error(data.error.message||'Gemini API error');
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+  // Surface Gemini errors clearly
+  if(data.error) {
+    const msg = data.error.message || JSON.stringify(data.error);
+    throw new Error('Gemini: ' + msg);
+  }
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if(!text) throw new Error('Gemini returned empty response. Check your API key.');
+  return text;
+}
+
+/* Extract JSON robustly from Gemini response */
+function extractJSON(raw) {
+  // Try direct parse first
+  try { return JSON.parse(raw.trim()); } catch(e){}
+  // Strip markdown code fences
+  const stripped = raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+  try { return JSON.parse(stripped); } catch(e){}
+  // Find first { ... } block
+  const match = raw.match(/\{[\s\S]*\}/);
+  if(match) { try { return JSON.parse(match[0]); } catch(e){} }
+  throw new Error('Could not parse JSON from response');
 }
 
 function saveApiKey(k) {
@@ -456,29 +495,61 @@ function handleFile(f) {
 ══════════════════════════════════════════ */
 async function analyze() {
   if(!state.file) return;
+  if(!state.apiKey){ renderAnalyzeTab(); setTimeout(()=>showError('analyze','⚠️ Please enter your Gemini API key first (see the yellow box above).'),50); return; }
   renderLoading();
-  const filePart = {inline_data:{mime_type:state.file.mimeType, data:state.file.base64}};
-  if(!state.apiKey){ renderAnalyzeTab(); showError('analyze','Please set your Gemini API key first.'); return; }
+
+  const filePart = {inline_data:{mime_type: state.file.mimeType, data: state.file.base64}};
+
   try {
-    const systemPrompt = `You are a medical document analyzer. Extract all medicine and health information. Return ONLY valid JSON (no markdown, no backticks, no extra text):
-{"patient_name":null,"doctor_name":null,"hospital":null,"date":null,"diagnosis":null,"medicines":[{"name":"","generic_name":null,"category":"","purpose":"","dosage":"","frequency":"","duration":null,"form":"","timing":["Morning - 8:00 AM"],"instructions":"","warnings":[]}],"general_instructions":null,"follow_up":null,"total_amount":null}
-If not a medical document: {"error":"Not a medical document"}
-Extract ALL medicines listed. Suggest realistic timing based on frequency. Return ONLY the JSON object, nothing else.`;
-    const raw = await geminiCall(systemPrompt, [filePart, {text:'Analyze this medical document and return the JSON.'}]);
-    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
-    if(parsed.error) { state.file=null; showError('upload', parsed.error); renderAnalyzeTab(); return; }
+    const systemPrompt = `You are a medical document analyzer. The user will send you a medical bill, prescription, or discharge summary.
+Your task: Extract ALL medicine and health information and return ONLY a single valid JSON object.
+
+Return this exact JSON structure with real values filled in (no placeholders):
+{"patient_name":null,"doctor_name":null,"hospital":null,"date":null,"diagnosis":null,"medicines":[{"name":"MedicineName","generic_name":null,"category":"e.g. Antibiotic","purpose":"what it treats","dosage":"e.g. 500mg","frequency":"e.g. Twice daily","duration":null,"form":"e.g. Tablet","timing":["Morning - 8:00 AM","Night - 9:00 PM"],"instructions":"e.g. Take after food","warnings":[]}],"general_instructions":null,"follow_up":null,"total_amount":null}
+
+Rules:
+- Return ONLY the JSON. No explanations, no markdown, no code fences.
+- Extract every single medicine listed.
+- If timing is not specified, suggest based on frequency (Once daily = Morning 8AM, Twice = Morning + Night, Three times = Morning/Afternoon/Night).
+- If it is not a medical document at all, return: {"error":"Not a medical document"}`;
+
+    const raw = await geminiCall(systemPrompt, [
+      filePart,
+      {text: 'Analyze this medical document. Return only the JSON object.'}
+    ]);
+
+    const parsed = extractJSON(raw);
+
+    if(parsed.error) {
+      state.file = null;
+      renderAnalyzeTab();
+      setTimeout(()=>showError('upload', parsed.error), 50);
+      return;
+    }
+
     state.result = parsed;
-    state.msgs = [{role:'assistant',content:`Hi! I've analyzed your ${state.file.type==='pdf'?'PDF':'medical bill'}. Found **${parsed.medicines?.length||0} medicine(s)**${parsed.diagnosis?` for **${parsed.diagnosis}**`:''}.\\n\\nAsk me anything about your medicines! You can also set up reminders in the **Reminders** tab. 💊`}];
-    const r={};
-    (parsed.medicines||[]).forEach(m=>{ r[m.name]=false; });
-    state.reminders=r;
-    document.getElementById('nav-badge').style.display='';
-    document.getElementById('nav-badge').textContent=`${parsed.medicines?.length||0} meds`;
-    document.getElementById('tabbar').style.display='flex';
+    const diagText = parsed.diagnosis ? ' for **' + parsed.diagnosis + '**' : '';
+    state.msgs = [{role:'assistant', content:'Hi! I analyzed your ' + (state.file.type==='pdf'?'PDF':'medical bill') + '. Found ' + (parsed.medicines?.length||0) + ' medicine(s)' + diagText + '. Ask me anything about your medicines! Reminders tab is available too.'}];
+    const r = {};
+    (parsed.medicines||[]).forEach(m => { r[m.name] = false; });
+    state.reminders = r;
+    document.getElementById('nav-badge').style.display = '';
+    document.getElementById('nav-badge').textContent = `${parsed.medicines?.length||0} meds`;
+    document.getElementById('tabbar').style.display = 'flex';
     switchTab('analyze');
+
   } catch(e) {
+    console.error('Analyze error:', e);
     renderAnalyzeTab();
-    showError('analyze','Could not analyze. Try a clearer photo or a different PDF.');
+    // Show actual error so user knows what's wrong
+    const msg = e.message === 'NO_KEY'
+      ? 'Please enter your Gemini API key first.'
+      : e.message.includes('API_KEY_INVALID') || e.message.includes('API key')
+        ? '❌ Invalid API key. Please check your Gemini key and try again.'
+        : e.message.includes('quota') || e.message.includes('QUOTA')
+          ? '❌ API quota exceeded. Try again later.'
+          : '❌ ' + (e.message || 'Unknown error. Please try again.');
+    setTimeout(()=>showError('analyze', msg), 50);
   }
 }
 
@@ -532,14 +603,16 @@ async function sendChat(override) {
     : '';
 
   try {
-    const history = state.msgs.slice(0,-1); // all but last (which we just added)
-    const lastMsg = state.msgs[state.msgs.length-1];
-    const sysPrompt = `You are a friendly, knowledgeable medical assistant. Answer questions about medicines clearly and in simple language. Always remind users to consult their doctor for personalized advice. Be concise but helpful. ${ctx}`;
-    const reply = await geminiCall(sysPrompt, [{text:lastMsg.content}], history);
-    state.msgs.push({role:'assistant',content:reply||'Sorry, try again.'});
+    const allMsgs = state.msgs; // includes the user msg we just pushed
+    const sysPrompt = `You are a friendly, knowledgeable medical assistant. Answer questions about the user's medicines and medical bill clearly in simple language. Be concise but helpful. Always remind users to consult their doctor for personalized advice. ${ctx}`;
+    // Pass all previous messages as history, current message as the parts
+    const history = allMsgs.slice(0, -1);
+    const lastMsg = allMsgs[allMsgs.length - 1];
+    const reply = await geminiCall(sysPrompt, [{text: lastMsg.content}], history);
+    state.msgs.push({role:'assistant', content: reply || 'Sorry, I could not process that. Please try again.'});
   } catch(e) {
-    if(e.message==='NO_KEY') state.msgs.push({role:'assistant',content:'⚠️ Please set your Gemini API key in Settings.'});
-    else state.msgs.push({role:'assistant',content:'Something went wrong. Please try again.'});
+    if(e.message==='NO_KEY') state.msgs.push({role:'assistant',content:'⚠️ Please set your Gemini API key first.'});
+    else state.msgs.push({role:'assistant',content:'❌ Error: ' + (e.message||'Something went wrong. Please try again.')});
   }
   renderChat(false);
 }
