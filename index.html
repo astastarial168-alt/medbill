@@ -360,7 +360,7 @@ async function compressImage(base64, mimeType) {
 async function callGemini(base64, mimeType, prompt) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + key;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + key;
   const body = {
     contents: [{
       role: 'user',
@@ -386,7 +386,7 @@ async function callGemini(base64, mimeType, prompt) {
 async function callGeminiChat(messages, systemContext) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + key;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + key;
   // Build contents - alternate user/model
   const contents = [];
   messages.forEach((m, i) => {
