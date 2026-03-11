@@ -8,12 +8,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="MedBill AI"/>
 <meta name="mobile-web-app-capable" content="yes"/>
-<title>MedBill AI</title>
+<title>MedBill AI — by Astastarial</title>
 
 <!-- PWA Manifest via blob -->
 <script>
 const manifest = {
-  name: "MedBill AI – Medical Analyzer",
+  name: "MedBill AI by Astastarial",
   short_name: "MedBill AI",
   description: "Analyze medical bills, get medicine info, set reminders",
   start_url: "./",
@@ -255,7 +255,7 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v11</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v12 · © Astastarial</span></span>
     <span class="nav-badge" id="nav-badge" style="display:none"></span>
   </nav>
 
@@ -328,13 +328,45 @@ let state = {
   shareCode: null,
   notifPerm: Notification ? Notification.permission : 'denied',
   reminderTimers: [],
-  apiKey: localStorage.getItem('groq_api_key') || '',
+  apiKey: localStorage.getItem('groq_api_key') || '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',
 };
 
 /* ══════════════════════════════════════════
    GROQ API (Free, no quota issues)
 ══════════════════════════════════════════ */
 
+// Convert PDF first page to JPEG base64 using PDF.js
+async function pdfToImage(base64) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (typeof pdfjsLib === 'undefined') {
+        reject(new Error('PDF.js not loaded. Please refresh the page.'));
+        return;
+      }
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdfData = atob(base64);
+      const arr = new Uint8Array(pdfData.length);
+      for (let i = 0; i < pdfData.length; i++) arr[i] = pdfData.charCodeAt(i);
+      const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      let quality = 0.85;
+      let result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+      while (result.length > 1000000 && quality > 0.3) {
+        quality = Math.round((quality - 0.1) * 10) / 10;
+        result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+      }
+      console.log('PDF→Image:', Math.round(result.length/1024) + 'KB at q=' + quality);
+      resolve({ base64: result, mimeType: 'image/jpeg' });
+    } catch(e) { reject(e); }
+  });
+}
+
+// Compress image
 async function compressImage(base64, mimeType) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -361,42 +393,60 @@ async function compressImage(base64, mimeType) {
   });
 }
 
+// XHR-based fetch — bypasses CORS preflight issues in some browsers
+function xhrPost(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.onload = () => {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch(e) { reject(new Error('Bad JSON response (status ' + xhr.status + ')')); }
+    };
+    xhr.onerror = () => reject(new Error('Network blocked. Open in incognito or try mobile data.'));
+    xhr.ontimeout = () => reject(new Error('Request timed out. Check your internet.'));
+    xhr.timeout = 30000;
+    xhr.send(body);
+  });
+}
+
+// ── Proxy URL — replace with your Cloudflare Worker URL after deploying ──
+const PROXY_URL = state.proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
+
+async function groqRequest(body, key) {
+  const proxyUrl = localStorage.getItem('medbill_proxy') || '';
+  const endpoint = proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
+  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
+
+  // Try fetch
+  try {
+    const res = await fetch(endpoint, { method: 'POST', mode: 'cors', headers, body });
+    const data = await res.json();
+    return data;
+  } catch(e) {
+    // Try XHR fallback
+    try {
+      return await xhrPost(endpoint, headers, body);
+    } catch(e2) {
+      throw new Error('Cannot reach API. ' + (proxyUrl ? 'Proxy error: ' : 'Set up proxy: ') + e2.message);
+    }
+  }
+}
+
 async function callGroq(base64, mimeType, prompt) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-
   const imageUrl = 'data:' + mimeType + ';base64,' + base64;
-
   const body = JSON.stringify({
     model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image_url', image_url: { url: imageUrl } },
-        { type: 'text', text: prompt }
-      ]
-    }],
-    max_tokens: 2048,
-    temperature: 0.1
+    messages: [{ role: 'user', content: [
+      { type: 'image_url', image_url: { url: imageUrl } },
+      { type: 'text', text: prompt }
+    ]}],
+    max_tokens: 2048, temperature: 0.1
   });
-
-  console.log('Calling Groq, body:', Math.round(body.length/1024) + 'KB');
-
-  let res;
-  try {
-    res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + key
-      },
-      body: body
-    });
-  } catch(e) {
-    throw new Error('Network error: ' + e.message + '. Try disabling extensions or switching networks.');
-  }
-
-  const data = await res.json();
+  console.log('Calling Groq via', localStorage.getItem('medbill_proxy') ? 'proxy' : 'direct', Math.round(body.length/1024) + 'KB');
+  const data = await groqRequest(body, key);
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('Empty response from Groq');
@@ -406,16 +456,10 @@ async function callGroq(base64, mimeType, prompt) {
 async function callGroqChat(messages, systemContext) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-
   const groqMessages = [{ role: 'system', content: systemContext }];
   messages.forEach(m => groqMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
-
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: groqMessages, max_tokens: 1024, temperature: 0.3 })
-  });
-  const data = await res.json();
+  const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: groqMessages, max_tokens: 1024, temperature: 0.3 });
+  const data = await groqRequest(body, key);
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data.choices?.[0]?.message?.content || 'Sorry, no response.';
 }
@@ -462,6 +506,46 @@ document.getElementById('btn-dismiss')?.addEventListener('click', () => {
 function genCode() { return Math.random().toString(36).substring(2,8).toUpperCase(); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function fmt(t) { return esc(t).replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>'); }
+
+/* ── Persist & restore analysis data ── */
+function saveData() {
+  try {
+    localStorage.setItem('medbill_result', JSON.stringify(state.result));
+    localStorage.setItem('medbill_reminders', JSON.stringify(state.reminders));
+    localStorage.setItem('medbill_msgs', JSON.stringify(state.msgs));
+  } catch(e) { console.warn('Could not save data:', e); }
+}
+
+function loadSavedData() {
+  try {
+    const r = localStorage.getItem('medbill_result');
+    const rem = localStorage.getItem('medbill_reminders');
+    const msgs = localStorage.getItem('medbill_msgs');
+    if (r) {
+      state.result = JSON.parse(r);
+      state.reminders = rem ? JSON.parse(rem) : {};
+      state.msgs = msgs ? JSON.parse(msgs) : [];
+      // Restore nav badge
+      const medCount = state.result.medicines ? state.result.medicines.length : 0;
+      const labCount = state.result.lab_results ? state.result.lab_results.length : 0;
+      const badge = document.getElementById('nav-badge');
+      if (badge) {
+        badge.style.display = '';
+        badge.textContent = medCount > 0 && labCount > 0 ? medCount + 'm ' + labCount + 'l' : medCount > 0 ? medCount + ' meds' : labCount + ' labs';
+      }
+      document.getElementById('tabbar').style.display = 'flex';
+      scheduleReminders();
+      return true;
+    }
+  } catch(e) { console.warn('Could not load saved data:', e); }
+  return false;
+}
+
+function clearSavedData() {
+  localStorage.removeItem('medbill_result');
+  localStorage.removeItem('medbill_reminders');
+  localStorage.removeItem('medbill_msgs');
+}
 
 function showAlert(msg, dur=6000) {
   const div = document.createElement('div');
@@ -542,10 +626,17 @@ async function analyze() {
   renderLoading();
 
   try {
-    // Compress image for faster/reliable API call
     let b64 = state.file.base64;
     let mime = state.file.mimeType;
-    if (state.file.type === 'image') {
+
+    if (state.file.type === 'pdf') {
+      // Convert PDF page 1 to image — Groq vision only supports images
+      document.querySelector('.loading-card div:last-child').textContent = 'Converting PDF to image…';
+      const converted = await pdfToImage(b64);
+      b64 = converted.base64;
+      mime = converted.mimeType;
+    } else {
+      // Compress image
       const compressed = await compressImage(b64, mime);
       b64 = compressed.base64;
       mime = compressed.mimeType;
@@ -830,39 +921,17 @@ function renderAnalyzeTab() {
   }
 
   html += '<div class="disclaimer">⚕️ For informational purposes only. Always consult your doctor.</div>';
+  html += '<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px;padding-bottom:8px">© 2025 MedBill AI · Built by <strong style="color:var(--accent)">Astastarial</strong> · All rights reserved<br>Unauthorized copying or redistribution is prohibited.</div>';
   html += '<button class="btn-outline" style="width:100%;margin-top:16px" onclick="resetAll()">📂 Analyze Another Document</button>';
   html += '</div>';
   c.innerHTML = html;
 }
 
 function renderHero() {
-  const keyBanner = !state.apiKey ? `
-  <div style="background:rgba(255,209,102,0.08);border:1px solid rgba(255,209,102,0.25);border-radius:16px;padding:16px 18px;margin-bottom:20px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <span style="font-size:22px">🔑</span>
-      <div>
-        <div style="font-size:14px;font-weight:800;color:var(--gold)">Groq API Key Required</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">100% Free · No quota issues · No credit card</div>
-      </div>
-    </div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.6">
-      1. Go to <strong style="color:var(--accent)">console.groq.com</strong><br>
-      2. Sign up free → click <strong style="color:var(--text)">"API Keys"</strong> → Create<br>
-      3. Copy the key and paste below 👇
-    </div>
-    <div style="display:flex;gap:8px">
-      <input id="key-input" type="password" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);font-family:monospace" placeholder="gsk_...">
-      <button class="btn-primary" style="width:auto;padding:11px 16px;font-size:13px" onclick="applyKey()">Save</button>
-    </div>
-    <div id="model-test-result" style="margin-top:8px;font-size:12px;display:none;padding:8px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--border)"></div>
-    <div style="margin-top:8px;display:flex;gap:8px;justify-content:center">
-      <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">→ Open Groq Console (Free)</a>
-    </div>
-  </div>` : `
+  const keyBanner = `
   <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
     <span style="font-size:16px">✅</span>
-    <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">Groq AI connected ⚡</span>
-    <button onclick="clearKey()" style="font-size:12px;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:8px;padding:4px 10px">Change</button>
+    <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">AI Ready — just upload your document!</span>
   </div>`;
 
   return `
@@ -877,6 +946,14 @@ function renderHero() {
       <div class="feature-card"><div class="feature-icon">🔗</div><div class="feature-title">Share</div><div class="feature-sub">Share with family</div></div>
     </div>
   </div>
+  <!-- About / Ownership Badge -->
+  <div onclick="document.getElementById('about-modal').style.display='flex'" style="display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 0 4px;cursor:pointer">
+    <span style="font-size:11px;color:var(--muted)">Built & owned by</span>
+    <span style="font-size:11px;font-weight:800;color:var(--accent)">Astastarial</span>
+    <span style="font-size:11px;color:var(--muted)">·</span>
+    <span style="font-size:11px;color:var(--muted)">© 2025 All rights reserved</span>
+  </div>
+
   <div style="padding:0 0 8px">
     ${keyBanner}
     <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFile(this.files[0])">
@@ -1008,7 +1085,11 @@ function renderRemindersTab() {
       <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6">Toggle reminders below. You'll receive notifications and in-app alerts at the right times.</div>
       ${items}
     </div>
-    <div class="disclaimer" style="margin-top:10px">🔔 Keep this app open for reminders to work. Notifications must be allowed in your browser settings.</div>
+    <div class="disclaimer" style="margin-top:10px">
+      🔔 <strong>Keep this tab open</strong> for reminders to work.<br>
+      Add the app to your Home Screen for best results.<br>
+      Notification status: <strong style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">${state.notifPerm==='granted'?'✅ Enabled':'❌ ' + state.notifPerm}</strong>
+    </div>
   </div>`;
 }
 
@@ -1111,6 +1192,22 @@ function applyKey() {
   renderContent();
 }
 
+function saveProxy() {
+  const el = document.getElementById('proxy-input');
+  if (!el) return;
+  const url = el.value.trim().replace(/\/$/, '');
+  if (!url) return;
+  localStorage.setItem('medbill_proxy', url);
+  showAlert('✅ Proxy saved! Try analyzing now.');
+  renderContent();
+}
+
+function clearProxy() {
+  localStorage.removeItem('medbill_proxy');
+  showAlert('Proxy removed.');
+  renderContent();
+}
+
 function clearKey() {
   state.apiKey = '';
   localStorage.removeItem('groq_api_key');
@@ -1120,23 +1217,51 @@ function clearKey() {
 function resetAll() {
   state.file=null; state.result=null; state.msgs=[]; state.shareCode=null; state.reminders={};
   state.reminderTimers.forEach(clearInterval); state.reminderTimers=[];
+  clearSavedData();
   document.getElementById('tabbar').style.display='none';
   document.getElementById('nav-badge').style.display='none';
   switchTab('analyze');
 }
 
 function toggleReminder(name) {
-  if(state.notifPerm!=='granted' && !state.reminders[name]) {
-    Notification.requestPermission().then(p=>{ state.notifPerm=p; state.reminders[name]=true; scheduleReminders(); renderRemindersTab(); });
+  const turningOn = !state.reminders[name];
+  if (turningOn && state.notifPerm !== 'granted') {
+    Notification.requestPermission().then(p => {
+      state.notifPerm = p;
+      state.reminders[name] = true;
+      saveData();
+      scheduleReminders();
+      renderRemindersTab();
+      if (p === 'granted') showAlert('✅ Reminder set for ' + name);
+      else showAlert('⚠️ Reminder set (in-app only — notifications blocked)');
+    });
     return;
   }
   state.reminders[name] = !state.reminders[name];
+  saveData();
   scheduleReminders();
   renderRemindersTab();
+  if (state.reminders[name]) showAlert('✅ Reminder set for ' + name);
 }
 
 function reqNotif() {
-  Notification.requestPermission().then(p=>{ state.notifPerm=p; renderRemindersTab(); });
+  if (!('Notification' in window)) {
+    showAlert('Your browser does not support notifications. Try Chrome on Android.');
+    return;
+  }
+  Notification.requestPermission().then(p => {
+    state.notifPerm = p;
+    if (p === 'granted') {
+      showAlert('✅ Notifications enabled! Reminders will work now.');
+      // Send a test notification immediately
+      setTimeout(() => {
+        new Notification('💊 MedBill AI', { body: 'Notifications are working! You will be reminded when it is time to take your medicines.', icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>' });
+      }, 500);
+    } else if (p === 'denied') {
+      showAlert('❌ Notifications blocked. Go to browser Settings → Site Settings → Notifications → Allow for this site.');
+    }
+    renderRemindersTab();
+  });
 }
 
 function loadCode() {
@@ -1177,8 +1302,43 @@ function copyCode() {
 /* Global file input handler (exposed to HTML) */
 window.handleFile = handleFile;
 
-/* ── Initial render ── */
+/* ── Initial render — load saved data first ── */
+loadSavedData();
 renderContent();
+
+/* ── Request notification permission on first visit ── */
+if ('Notification' in window && Notification.permission === 'default') {
+  // Ask after 3 seconds so page loads first
+  setTimeout(() => {
+    Notification.requestPermission().then(p => { state.notifPerm = p; });
+  }, 3000);
+}
 </script>
+<!-- About / Ownership Modal -->
+<div id="about-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:24px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:28px 24px;max-width:340px;width:100%;position:relative">
+    <button onclick="document.getElementById('about-modal').style.display='none'" style="position:absolute;top:16px;right:16px;font-size:20px;color:var(--muted);background:none;border:none">✕</button>
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:40px;margin-bottom:8px">💊</div>
+      <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 15 · 2025</div>
+    </div>
+    <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
+      <div style="font-size:18px;font-weight:800;color:var(--accent)">Astastarial</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">github.com/astastarial168-alt</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:16px">
+      © 2025 Astastarial. All rights reserved.<br>
+      This app, its design, code, and concept are the intellectual property of the creator.<br><br>
+      Unauthorized copying, redistribution, or claiming ownership of this app is strictly prohibited.
+    </div>
+    <div style="font-size:11px;color:var(--muted);background:var(--card2);border-radius:10px;padding:10px 12px;margin-bottom:16px">
+      🔒 <strong style="color:var(--text)">Privacy First</strong> — Your medical documents are processed securely and never stored on any server.
+    </div>
+    <button onclick="document.getElementById('about-modal').style.display='none'" class="btn-primary" style="width:100%">Close</button>
+  </div>
+</div>
+
 </body>
 </html>
