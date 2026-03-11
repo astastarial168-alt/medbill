@@ -8,12 +8,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="MedBill AI"/>
 <meta name="mobile-web-app-capable" content="yes"/>
-<title>MedBill AI — by Astastarial</title>
+<title>MedBill AI</title>
 
 <!-- PWA Manifest via blob -->
 <script>
 const manifest = {
-  name: "MedBill AI by Astastarial",
+  name: "MedBill AI – Medical Analyzer",
   short_name: "MedBill AI",
   description: "Analyze medical bills, get medicine info, set reminders",
   start_url: "./",
@@ -255,7 +255,7 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v12 · © Astastarial</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v4</span></span>
     <span class="nav-badge" id="nav-badge" style="display:none"></span>
   </nav>
 
@@ -328,142 +328,81 @@ let state = {
   shareCode: null,
   notifPerm: Notification ? Notification.permission : 'denied',
   reminderTimers: [],
-  apiKey: localStorage.getItem('groq_api_key') || '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',
+  apiKey: localStorage.getItem('gemini_api_key') || '',
 };
 
-/* ══════════════════════════════════════════
-   GROQ API (Free, no quota issues)
-══════════════════════════════════════════ */
+/* ══════════════════════════════════
+   GEMINI API
+═══════════════════════════════════ */
 
-// Convert PDF first page to JPEG base64 using PDF.js
-async function pdfToImage(base64) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      if (typeof pdfjsLib === 'undefined') {
-        reject(new Error('PDF.js not loaded. Please refresh the page.'));
-        return;
-      }
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      const pdfData = atob(base64);
-      const arr = new Uint8Array(pdfData.length);
-      for (let i = 0; i < pdfData.length; i++) arr[i] = pdfData.charCodeAt(i);
-      const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 2.0 });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      let quality = 0.85;
-      let result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
-      while (result.length > 1000000 && quality > 0.3) {
-        quality = Math.round((quality - 0.1) * 10) / 10;
-        result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
-      }
-      console.log('PDF→Image:', Math.round(result.length/1024) + 'KB at q=' + quality);
-      resolve({ base64: result, mimeType: 'image/jpeg' });
-    } catch(e) { reject(e); }
-  });
-}
-
-// Compress image
+// Compress image to max 1MB before sending to Gemini
 async function compressImage(base64, mimeType) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let w = img.width, h = img.height;
-      const MAX = 1024;
+      const MAX = 1200;
       if (w > MAX || h > MAX) {
         if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
         else { w = Math.round(w * MAX / h); h = MAX; }
       }
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      let quality = 0.8, result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
-      while (result.length > 1000000 && quality > 0.2) {
-        quality = Math.round((quality - 0.1) * 10) / 10;
-        result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
-      }
-      console.log('Compressed:', Math.round(result.length/1024) + 'KB at q=' + quality);
-      resolve({ base64: result, mimeType: 'image/jpeg' });
+      const compressed = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+      resolve({ base64: compressed, mimeType: 'image/jpeg' });
     };
     img.onerror = () => resolve({ base64, mimeType });
     img.src = 'data:' + mimeType + ';base64,' + base64;
   });
 }
 
-// XHR-based fetch — bypasses CORS preflight issues in some browsers
-function xhrPost(url, headers, body) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
-    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
-    xhr.onload = () => {
-      try { resolve(JSON.parse(xhr.responseText)); }
-      catch(e) { reject(new Error('Bad JSON response (status ' + xhr.status + ')')); }
-    };
-    xhr.onerror = () => reject(new Error('Network blocked. Open in incognito or try mobile data.'));
-    xhr.ontimeout = () => reject(new Error('Request timed out. Check your internet.'));
-    xhr.timeout = 30000;
-    xhr.send(body);
-  });
-}
-
-// ── Proxy URL — replace with your Cloudflare Worker URL after deploying ──
-const PROXY_URL = state.proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
-
-async function groqRequest(body, key) {
-  const proxyUrl = localStorage.getItem('medbill_proxy') || '';
-  const endpoint = proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
-  // If using proxy: no auth header needed (worker has the secret key)
-  // If direct: send key in header
-  const headers = proxyUrl
-    ? { 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
-
-  try {
-    const res = await fetch(endpoint, { method: 'POST', mode: 'cors', headers, body });
-    const data = await res.json();
-    return data;
-  } catch(e) {
-    try {
-      return await xhrPost(endpoint, headers, body);
-    } catch(e2) {
-      throw new Error('Cannot reach API: ' + e2.message);
-    }
-  }
-}
-
-async function callGroq(base64, mimeType, prompt) {
+async function callGemini(base64, mimeType, prompt) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-  const imageUrl = 'data:' + mimeType + ';base64,' + base64;
-  const body = JSON.stringify({
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-    messages: [{ role: 'user', content: [
-      { type: 'image_url', image_url: { url: imageUrl } },
-      { type: 'text', text: prompt }
-    ]}],
-    max_tokens: 2048, temperature: 0.1
+  const url = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=' + key;
+  const body = {
+    contents: [{
+      role: 'user',
+      parts: [
+        { inline_data: { mime_type: mimeType, data: base64 } },
+        { text: prompt }
+      ]
+    }],
+    generationConfig: { maxOutputTokens: 2048, temperature: 0.1 }
+  };
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   });
-  console.log('Calling Groq via', localStorage.getItem('medbill_proxy') ? 'proxy' : 'direct', Math.round(body.length/1024) + 'KB');
-  const data = await groqRequest(body, key);
+  const data = await res.json();
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Empty response from Groq');
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Empty response from Gemini. Key may be invalid.');
   return text;
 }
 
-async function callGroqChat(messages, systemContext) {
+async function callGeminiChat(messages, systemContext) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-  const groqMessages = [{ role: 'system', content: systemContext }];
-  messages.forEach(m => groqMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
-  const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: groqMessages, max_tokens: 1024, temperature: 0.3 });
-  const data = await groqRequest(body, key);
+  const url = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=' + key;
+  // Build contents - alternate user/model
+  const contents = [];
+  messages.forEach((m, i) => {
+    contents.push({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: (i === 0 && m.role === 'user') ? (systemContext + '\n\n' + m.content) : m.content }]
+    });
+  });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1024, temperature: 0.3 } })
+  });
+  const data = await res.json();
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return data.choices?.[0]?.message?.content || 'Sorry, no response.';
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, no response.';
 }
 
 function extractJSON(raw) {
@@ -477,11 +416,7 @@ function extractJSON(raw) {
 
 function saveApiKey(k) {
   state.apiKey = k.trim();
-  localStorage.setItem('groq_api_key', state.apiKey);
-}
-function saveModel(m) {
-  state.detectedModel = m;
-  localStorage.setItem('gemini_model', m);
+  localStorage.setItem('gemini_api_key', state.apiKey);
 }
 
 /* ══════════════════════════════════════════
@@ -508,46 +443,6 @@ document.getElementById('btn-dismiss')?.addEventListener('click', () => {
 function genCode() { return Math.random().toString(36).substring(2,8).toUpperCase(); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function fmt(t) { return esc(t).replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>'); }
-
-/* ── Persist & restore analysis data ── */
-function saveData() {
-  try {
-    localStorage.setItem('medbill_result', JSON.stringify(state.result));
-    localStorage.setItem('medbill_reminders', JSON.stringify(state.reminders));
-    localStorage.setItem('medbill_msgs', JSON.stringify(state.msgs));
-  } catch(e) { console.warn('Could not save data:', e); }
-}
-
-function loadSavedData() {
-  try {
-    const r = localStorage.getItem('medbill_result');
-    const rem = localStorage.getItem('medbill_reminders');
-    const msgs = localStorage.getItem('medbill_msgs');
-    if (r) {
-      state.result = JSON.parse(r);
-      state.reminders = rem ? JSON.parse(rem) : {};
-      state.msgs = msgs ? JSON.parse(msgs) : [];
-      // Restore nav badge
-      const medCount = state.result.medicines ? state.result.medicines.length : 0;
-      const labCount = state.result.lab_results ? state.result.lab_results.length : 0;
-      const badge = document.getElementById('nav-badge');
-      if (badge) {
-        badge.style.display = '';
-        badge.textContent = medCount > 0 && labCount > 0 ? medCount + 'm ' + labCount + 'l' : medCount > 0 ? medCount + ' meds' : labCount + ' labs';
-      }
-      document.getElementById('tabbar').style.display = 'flex';
-      scheduleReminders();
-      return true;
-    }
-  } catch(e) { console.warn('Could not load saved data:', e); }
-  return false;
-}
-
-function clearSavedData() {
-  localStorage.removeItem('medbill_result');
-  localStorage.removeItem('medbill_reminders');
-  localStorage.removeItem('medbill_msgs');
-}
 
 function showAlert(msg, dur=6000) {
   const div = document.createElement('div');
@@ -628,84 +523,28 @@ async function analyze() {
   renderLoading();
 
   try {
+    // Compress image for faster/reliable API call
     let b64 = state.file.base64;
     let mime = state.file.mimeType;
-
-    if (state.file.type === 'pdf') {
-      // Convert PDF page 1 to image — Groq vision only supports images
-      document.querySelector('.loading-card div:last-child').textContent = 'Converting PDF to image…';
-      const converted = await pdfToImage(b64);
-      b64 = converted.base64;
-      mime = converted.mimeType;
-    } else {
-      // Compress image
+    if (state.file.type === 'image') {
       const compressed = await compressImage(b64, mime);
       b64 = compressed.base64;
       mime = compressed.mimeType;
     }
 
-    const prompt = `You are an expert medical document analyzer. Carefully read this document — it may be a PRESCRIPTION, LAB REPORT, BLOOD TEST, PATHOLOGY REPORT, DISCHARGE SUMMARY, or MEDICAL BILL.
+    const prompt = `You are a medical document analyzer. Look at this medical bill or prescription image carefully.
 
-Determine the document type and extract ALL information. Return ONLY a single valid JSON object with NO markdown, NO explanation:
+Extract ALL medicines and health information. Return ONLY a valid JSON object - no markdown, no explanation, just the raw JSON:
 
-{
-  "document_type": "prescription|lab_report|blood_test|discharge_summary|medical_bill|other",
-  "patient_name": null,
-  "patient_age": null,
-  "patient_gender": null,
-  "doctor_name": null,
-  "hospital": null,
-  "date": null,
-  "diagnosis": null,
-  "medicines": [
-    {
-      "name": "MedicineName",
-      "generic_name": null,
-      "category": "Antibiotic",
-      "purpose": "treats infection",
-      "dosage": "500mg",
-      "frequency": "Twice daily",
-      "duration": "5 days",
-      "form": "Tablet",
-      "timing": ["Morning - 8:00 AM", "Night - 9:00 PM"],
-      "instructions": "Take after food",
-      "warnings": []
-    }
-  ],
-  "lab_results": [
-    {
-      "test_name": "Hemoglobin",
-      "value": "11.2",
-      "unit": "g/dL",
-      "normal_range": "12.0-16.0",
-      "status": "low|normal|high|borderline",
-      "interpretation": "Slightly below normal, mild anemia"
-    }
-  ],
-  "vitals": {
-    "blood_pressure": null,
-    "pulse": null,
-    "temperature": null,
-    "weight": null,
-    "height": null,
-    "bmi": null,
-    "oxygen_saturation": null
-  },
-  "general_instructions": null,
-  "follow_up": null,
-  "total_amount": null,
-  "summary": "One sentence plain-English summary of the document"
-}
+{"patient_name":null,"doctor_name":null,"hospital":null,"date":null,"diagnosis":null,"medicines":[{"name":"MedicineName","generic_name":null,"category":"Antibiotic","purpose":"treats infection","dosage":"500mg","frequency":"Twice daily","duration":"5 days","form":"Tablet","timing":["Morning - 8:00 AM","Night - 9:00 PM"],"instructions":"Take after food","warnings":[]}],"general_instructions":null,"follow_up":null,"total_amount":null}
 
 Rules:
-- Return ONLY the JSON. No other text.
-- For prescriptions: fill medicines array fully, leave lab_results as []
-- For lab reports: fill lab_results fully with status (low/normal/high/borderline), leave medicines as []
-- For discharge summaries: fill both medicines and lab_results if present
-- Mark abnormal lab values clearly in status field
-- If not a medical document at all: {"error":"Not a medical document"}`;
+- Return ONLY the JSON object, nothing else
+- Extract every single medicine you can see
+- If timing not stated, suggest based on frequency
+- If not a medical document: {"error":"Not a medical document"}`;
 
-    const raw = await callGroq(b64, mime, prompt);
+    const raw = await callGemini(b64, mime, prompt);
     const parsed = extractJSON(raw);
 
     if (parsed.error) {
@@ -718,23 +557,14 @@ Rules:
     state.result = parsed;
     const medCount = parsed.medicines ? parsed.medicines.length : 0;
     const diagPart = parsed.diagnosis ? ' for ' + parsed.diagnosis : '';
-    const docType = parsed.document_type || 'document';
-    const labCount = parsed.lab_results ? parsed.lab_results.length : 0;
-    const abnormal = parsed.lab_results ? parsed.lab_results.filter(l => l.status === 'low' || l.status === 'high').length : 0;
-    let greeting = 'Hi! I analyzed your ' + docType.replace('_',' ') + '.';
-    if (medCount > 0) greeting += ' Found ' + medCount + ' medicine(s).';
-    if (labCount > 0) greeting += ' Found ' + labCount + ' lab test(s)' + (abnormal > 0 ? ' — ⚠️ ' + abnormal + ' abnormal result(s)!' : ' — all in range ✅') + '.';
-    if (parsed.summary) greeting += ' ' + parsed.summary;
-    greeting += ' Ask me anything!';
-    state.msgs = [{ role: 'assistant', content: greeting }];
+    state.msgs = [{ role: 'assistant', content: 'Hi! Analyzed your ' + (state.file.type === 'pdf' ? 'PDF' : 'medical bill') + '. Found ' + medCount + ' medicine(s)' + diagPart + '. Ask me anything about your medicines! Reminders tab is also available.' }];
 
     const r = {};
     (parsed.medicines || []).forEach(m => { r[m.name] = false; });
     state.reminders = r;
 
     document.getElementById('nav-badge').style.display = '';
-    const labCount2 = parsed.lab_results ? parsed.lab_results.length : 0;
-    document.getElementById('nav-badge').textContent = medCount > 0 && labCount2 > 0 ? medCount + 'm ' + labCount2 + 'l' : medCount > 0 ? medCount + ' meds' : labCount2 + ' labs';
+    document.getElementById('nav-badge').textContent = medCount + ' meds';
     document.getElementById('tabbar').style.display = 'flex';
     switchTab('analyze');
 
@@ -795,12 +625,12 @@ async function sendChat(override) {
   renderChat(true);
 
   const ctx = state.result
-    ? 'Document type: ' + (state.result.document_type||'unknown') + '. Diagnosis: ' + (state.result.diagnosis||'N/A') + '. Medicines: ' + (state.result.medicines||[]).map(m=>m.name+' '+( m.dosage||'')+' '+(m.frequency||'')).join('; ') + '. Lab results: ' + (state.result.lab_results||[]).map(l=>l.test_name+' '+l.value+' '+l.unit+' ('+l.status+')').join('; ')
+    ? `Medicines: ${(state.result.medicines||[]).map(m=>`${m.name} ${m.dosage||''} ${m.frequency||''}`).join('; ')}, Diagnosis: ${state.result.diagnosis||'N/A'}`
     : '';
 
   try {
-    const sysCtx = 'You are a friendly medical assistant. You can explain medicines, lab test results, normal ranges, what abnormal values mean, and general health advice. Always recommend consulting a doctor for diagnosis or treatment. Context: ' + ctx;
-    const reply = await callGroqChat(state.msgs, sysCtx);
+    const sysCtx = 'You are a friendly medical assistant. Answer questions about medicines clearly and simply. Always remind users to consult their doctor. ' + ctx;
+    const reply = await callGeminiChat(state.msgs, sysCtx);
     state.msgs.push({ role: 'assistant', content: reply });
   } catch(e) {
     const errMsg = e.message === 'NO_KEY' ? 'Please set your Gemini API key first.' : 'Error: ' + e.message;
@@ -857,83 +687,67 @@ function renderAnalyzeTab() {
   }
   // Show results
   const r = state.result;
-  let html = '<div class="fadeUp">';
-
-  // Document type badge
-  if (r.document_type) {
-    const dtIcons = { prescription:'💊', lab_report:'🧪', blood_test:'🩸', discharge_summary:'🏥', medical_bill:'💰', other:'📄' };
-    const dtLabels = { prescription:'Prescription', lab_report:'Lab Report', blood_test:'Blood Test', discharge_summary:'Discharge Summary', medical_bill:'Medical Bill', other:'Medical Document' };
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:10px 14px;background:var(--adim);border:1px solid var(--aborder);border-radius:12px">'
-      + '<span style="font-size:20px">' + (dtIcons[r.document_type]||'📄') + '</span>'
-      + '<span style="font-size:13px;font-weight:700;color:var(--accent)">' + (dtLabels[r.document_type]||'Medical Document') + '</span>'
-      + (r.summary ? '<span style="font-size:12px;color:var(--muted);margin-left:4px">· ' + esc(r.summary) + '</span>' : '')
-      + '</div>';
-  }
+  let html = `<div class="fadeUp">`;
 
   // Patient info
-  const hasPatient = r.patient_name||r.doctor_name||r.date||r.diagnosis||r.hospital||r.patient_age||r.patient_gender;
-  if (hasPatient) {
-    html += '<div class="sec-label">Patient Information</div>'
-      + '<div class="card" style="line-height:1.9;font-size:14px;color:var(--sub)">'
-      + (r.patient_name ? '<div>👤 <strong>Patient:</strong> ' + esc(r.patient_name) + (r.patient_age?' · '+esc(r.patient_age):'') + (r.patient_gender?' · '+esc(r.patient_gender):'') + '</div>' : '')
-      + (r.doctor_name ? '<div>🩺 <strong>Doctor:</strong> ' + esc(r.doctor_name) + '</div>' : '')
-      + (r.hospital ? '<div>🏥 <strong>Hospital:</strong> ' + esc(r.hospital) + '</div>' : '')
-      + (r.date ? '<div>📅 <strong>Date:</strong> ' + esc(r.date) + '</div>' : '')
-      + (r.diagnosis ? '<div>🔬 <strong>Diagnosis:</strong> ' + esc(r.diagnosis) + '</div>' : '')
-      + (r.total_amount ? '<div>💰 <strong>Total:</strong> ' + esc(r.total_amount) + '</div>' : '')
-      + '</div>';
-  }
-
-  // Vitals
-  const v = r.vitals || {};
-  const hasVitals = v.blood_pressure||v.pulse||v.temperature||v.weight||v.height||v.bmi||v.oxygen_saturation;
-  if (hasVitals) {
-    html += '<div class="sec-label">❤️ Vitals</div>'
-      + '<div class="card"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-      + (v.blood_pressure ? renderVitalItem('🩸','BP', v.blood_pressure) : '')
-      + (v.pulse ? renderVitalItem('💓','Pulse', v.pulse) : '')
-      + (v.temperature ? renderVitalItem('🌡️','Temp', v.temperature) : '')
-      + (v.oxygen_saturation ? renderVitalItem('💨','SpO2', v.oxygen_saturation) : '')
-      + (v.weight ? renderVitalItem('⚖️','Weight', v.weight) : '')
-      + (v.height ? renderVitalItem('📏','Height', v.height) : '')
-      + (v.bmi ? renderVitalItem('📊','BMI', v.bmi) : '')
-      + '</div></div>';
-  }
-
-  // Lab Results
-  if (r.lab_results && r.lab_results.length) {
-    const abnormal = r.lab_results.filter(l => l.status==='low'||l.status==='high').length;
-    html += '<div class="sec-label">🧪 Lab Results (' + r.lab_results.length + ')' + (abnormal?' <span style="color:var(--warn);font-size:11px">⚠️ '+abnormal+' abnormal</span>':'') + '</div>';
-    r.lab_results.forEach(l => { html += renderLabCard(l); });
+  if(r.patient_name||r.doctor_name||r.date||r.diagnosis||r.hospital) {
+    html += `<div class="sec-label">Patient Information</div>
+    <div class="card" style="line-height:1.8;font-size:14px;color:var(--sub)">
+      ${r.patient_name?`<div>👤 <strong>Patient:</strong> ${esc(r.patient_name)}</div>`:''}
+      ${r.doctor_name?`<div>🩺 <strong>Doctor:</strong> ${esc(r.doctor_name)}</div>`:''}
+      ${r.hospital?`<div>🏥 <strong>Hospital:</strong> ${esc(r.hospital)}</div>`:''}
+      ${r.date?`<div>📅 <strong>Date:</strong> ${esc(r.date)}</div>`:''}
+      ${r.diagnosis?`<div>🔬 <strong>Diagnosis:</strong> ${esc(r.diagnosis)}</div>`:''}
+      ${r.total_amount?`<div>💰 <strong>Total:</strong> ${esc(r.total_amount)}</div>`:''}
+    </div>`;
   }
 
   // Medicines
-  if (r.medicines && r.medicines.length) {
-    html += '<div class="sec-label">💊 Medicines (' + r.medicines.length + ')</div>';
+  if(r.medicines?.length) {
+    html += `<div class="sec-label">💊 Medicines (${r.medicines.length})</div>`;
     r.medicines.forEach(m => { html += renderMedCard(m); });
   }
 
-  if (r.general_instructions) {
-    html += '<div class="sec-label">📋 General Instructions</div>'
-      + '<div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">' + esc(r.general_instructions) + '</div>';
+  if(r.general_instructions) {
+    html += `<div class="sec-label">📋 General Instructions</div>
+    <div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">${esc(r.general_instructions)}</div>`;
   }
-  if (r.follow_up) {
-    html += '<div class="sec-label">🗓 Follow-Up</div>'
-      + '<div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">' + esc(r.follow_up) + '</div>';
+  if(r.follow_up) {
+    html += `<div class="sec-label">🗓 Follow-Up</div>
+    <div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">${esc(r.follow_up)}</div>`;
   }
 
-  html += '<div class="disclaimer">⚕️ For informational purposes only. Always consult your doctor.</div>';
-  html += '<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px;padding-bottom:8px">© 2025 MedBill AI · Built by <strong style="color:var(--accent)">Astastarial</strong> · All rights reserved<br>Unauthorized copying or redistribution is prohibited.</div>';
-  html += '<button class="btn-outline" style="width:100%;margin-top:16px" onclick="resetAll()">📂 Analyze Another Document</button>';
-  html += '</div>';
+  html += `<div class="disclaimer">⚕️ For informational purposes only. Always follow your doctor's instructions.</div>`;
+  html += `<button class="btn-outline" style="width:100%;margin-top:16px" onclick="resetAll()">📄 Analyze New Bill</button>`;
+  html += `</div>`;
   c.innerHTML = html;
 }
 
 function renderHero() {
-  const keyBanner = `
+  const keyBanner = !state.apiKey ? `
+  <div style="background:rgba(255,209,102,0.08);border:1px solid rgba(255,209,102,0.25);border-radius:16px;padding:16px 18px;margin-bottom:20px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="font-size:22px">🔑</span>
+      <div>
+        <div style="font-size:14px;font-weight:800;color:var(--gold)">Gemini API Key Required</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Free from Google — takes 1 minute to get</div>
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+      1. Go to <strong style="color:var(--accent)">aistudio.google.com</strong><br>
+      2. Sign in with Google → click <strong style="color:var(--text)">"Get API Key"</strong><br>
+      3. Copy the key and paste below 👇
+    </div>
+    <div style="display:flex;gap:8px">
+      <input id="key-input" type="password" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);font-family:monospace" placeholder="AIza...">
+      <button class="btn-primary" style="width:auto;padding:11px 16px;font-size:13px" onclick="applyKey()">Save</button>
+    </div>
+    <div style="margin-top:8px;text-align:center"><a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">→ Open Google AI Studio</a></div>
+  </div>` : `
   <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
     <span style="font-size:16px">✅</span>
-    <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">AI Ready — just upload your document!</span>
+    <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">Gemini API connected</span>
+    <button onclick="clearKey()" style="font-size:12px;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:8px;padding:4px 10px">Change</button>
   </div>`;
 
   return `
@@ -948,25 +762,17 @@ function renderHero() {
       <div class="feature-card"><div class="feature-icon">🔗</div><div class="feature-title">Share</div><div class="feature-sub">Share with family</div></div>
     </div>
   </div>
-  <!-- About / Ownership Badge -->
-  <div onclick="document.getElementById('about-modal').style.display='flex'" style="display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 0 4px;cursor:pointer">
-    <span style="font-size:11px;color:var(--muted)">Built & owned by</span>
-    <span style="font-size:11px;font-weight:800;color:var(--accent)">Astastarial</span>
-    <span style="font-size:11px;color:var(--muted)">·</span>
-    <span style="font-size:11px;color:var(--muted)">© 2025 All rights reserved</span>
-  </div>
-
   <div style="padding:0 0 8px">
     ${keyBanner}
     <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFile(this.files[0])">
     <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" style="${!state.apiKey?'opacity:0.5;pointer-events:none':''}">
       <span class="upload-emoji">🏥</span>
-      <div class="upload-title">Upload Medical Document</div>
-      <div class="upload-sub">Prescription · Lab Report · Blood Test · Medical Bill</div>
+      <div class="upload-title">Upload Medical Bill</div>
+      <div class="upload-sub">Tap to choose a file from your phone<br>or camera roll</div>
       <div class="file-tags">
         <span class="file-tag">.jpg</span><span class="file-tag">.png</span><span class="file-tag">.pdf</span><span class="file-tag">.heic</span>
       </div>
-      <button class="btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">📂 Choose File</button>
+      <button class="btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">📷 Choose File</button>
     </div>
     <div id="err-upload" class="err-box" style="display:none"></div>
     <div class="or-divider">or enter a share code</div>
@@ -992,35 +798,6 @@ function renderUploadWithFile() {
     <button class="btn-primary" style="margin-top:14px" onclick="analyze()">🔍 Analyze Medical Bill</button>
     <div id="err-analyze" class="err-box" style="display:none"></div>
   </div>`;
-}
-
-function renderVitalItem(icon, label, value) {
-  return '<div style="background:var(--card2);border-radius:10px;padding:10px 12px">'
-    + '<div style="font-size:11px;color:var(--muted);margin-bottom:3px">' + icon + ' ' + label + '</div>'
-    + '<div style="font-size:15px;font-weight:700;color:var(--text)">' + esc(String(value)) + '</div>'
-    + '</div>';
-}
-
-function renderLabCard(l) {
-  const statusColors = { low:'#FF6B6B', high:'#FF6B6B', normal:'#00D4AA', borderline:'#FFD166' };
-  const statusBg = { low:'rgba(255,107,107,0.08)', high:'rgba(255,107,107,0.08)', normal:'rgba(0,212,170,0.07)', borderline:'rgba(255,209,102,0.09)' };
-  const statusIcon = { low:'⬇️', high:'⬆️', normal:'✅', borderline:'⚠️' };
-  const s = (l.status || 'normal').toLowerCase();
-  const color = statusColors[s] || '#9BB0C8';
-  const bg = statusBg[s] || 'transparent';
-  const icon = statusIcon[s] || '🔬';
-  return '<div class="med-card" style="border-left:3px solid ' + color + '">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
-    + '<div style="font-size:15px;font-weight:800;color:var(--text)">' + esc(l.test_name||'') + '</div>'
-    + '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;background:' + bg + ';color:' + color + '">' + icon + ' ' + esc((l.status||'').toUpperCase()) + '</span>'
-    + '</div>'
-    + '<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">'
-    + '<span style="font-size:22px;font-weight:800;color:' + color + '">' + esc(l.value||'') + '</span>'
-    + '<span style="font-size:13px;color:var(--muted)">' + esc(l.unit||'') + '</span>'
-    + (l.normal_range ? '<span style="font-size:12px;color:var(--muted);margin-left:8px">Normal: ' + esc(l.normal_range) + '</span>' : '')
-    + '</div>'
-    + (l.interpretation ? '<div style="font-size:13px;color:var(--sub);line-height:1.5;padding:8px 10px;background:var(--card2);border-radius:8px">💡 ' + esc(l.interpretation) + '</div>' : '')
-    + '</div>';
 }
 
 function renderMedCard(m) {
@@ -1087,11 +864,7 @@ function renderRemindersTab() {
       <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6">Toggle reminders below. You'll receive notifications and in-app alerts at the right times.</div>
       ${items}
     </div>
-    <div class="disclaimer" style="margin-top:10px">
-      🔔 <strong>Keep this tab open</strong> for reminders to work.<br>
-      Add the app to your Home Screen for best results.<br>
-      Notification status: <strong style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">${state.notifPerm==='granted'?'✅ Enabled':'❌ ' + state.notifPerm}</strong>
-    </div>
+    <div class="disclaimer" style="margin-top:10px">🔔 Keep this app open for reminders to work. Notifications must be allowed in your browser settings.</div>
   </div>`;
 }
 
@@ -1194,76 +967,32 @@ function applyKey() {
   renderContent();
 }
 
-function saveProxy() {
-  const el = document.getElementById('proxy-input');
-  if (!el) return;
-  const url = el.value.trim().replace(/\/$/, '');
-  if (!url) return;
-  localStorage.setItem('medbill_proxy', url);
-  showAlert('✅ Proxy saved! Try analyzing now.');
-  renderContent();
-}
-
-function clearProxy() {
-  localStorage.removeItem('medbill_proxy');
-  showAlert('Proxy removed.');
-  renderContent();
-}
-
 function clearKey() {
   state.apiKey = '';
-  localStorage.removeItem('groq_api_key');
+  localStorage.removeItem('gemini_api_key');
   renderContent();
 }
 
 function resetAll() {
   state.file=null; state.result=null; state.msgs=[]; state.shareCode=null; state.reminders={};
   state.reminderTimers.forEach(clearInterval); state.reminderTimers=[];
-  clearSavedData();
   document.getElementById('tabbar').style.display='none';
   document.getElementById('nav-badge').style.display='none';
   switchTab('analyze');
 }
 
 function toggleReminder(name) {
-  const turningOn = !state.reminders[name];
-  if (turningOn && state.notifPerm !== 'granted') {
-    Notification.requestPermission().then(p => {
-      state.notifPerm = p;
-      state.reminders[name] = true;
-      saveData();
-      scheduleReminders();
-      renderRemindersTab();
-      if (p === 'granted') showAlert('✅ Reminder set for ' + name);
-      else showAlert('⚠️ Reminder set (in-app only — notifications blocked)');
-    });
+  if(state.notifPerm!=='granted' && !state.reminders[name]) {
+    Notification.requestPermission().then(p=>{ state.notifPerm=p; state.reminders[name]=true; scheduleReminders(); renderRemindersTab(); });
     return;
   }
   state.reminders[name] = !state.reminders[name];
-  saveData();
   scheduleReminders();
   renderRemindersTab();
-  if (state.reminders[name]) showAlert('✅ Reminder set for ' + name);
 }
 
 function reqNotif() {
-  if (!('Notification' in window)) {
-    showAlert('Your browser does not support notifications. Try Chrome on Android.');
-    return;
-  }
-  Notification.requestPermission().then(p => {
-    state.notifPerm = p;
-    if (p === 'granted') {
-      showAlert('✅ Notifications enabled! Reminders will work now.');
-      // Send a test notification immediately
-      setTimeout(() => {
-        new Notification('💊 MedBill AI', { body: 'Notifications are working! You will be reminded when it is time to take your medicines.', icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>' });
-      }, 500);
-    } else if (p === 'denied') {
-      showAlert('❌ Notifications blocked. Go to browser Settings → Site Settings → Notifications → Allow for this site.');
-    }
-    renderRemindersTab();
-  });
+  Notification.requestPermission().then(p=>{ state.notifPerm=p; renderRemindersTab(); });
 }
 
 function loadCode() {
@@ -1304,43 +1033,8 @@ function copyCode() {
 /* Global file input handler (exposed to HTML) */
 window.handleFile = handleFile;
 
-/* ── Initial render — load saved data first ── */
-loadSavedData();
+/* ── Initial render ── */
 renderContent();
-
-/* ── Request notification permission on first visit ── */
-if ('Notification' in window && Notification.permission === 'default') {
-  // Ask after 3 seconds so page loads first
-  setTimeout(() => {
-    Notification.requestPermission().then(p => { state.notifPerm = p; });
-  }, 3000);
-}
 </script>
-<!-- About / Ownership Modal -->
-<div id="about-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:24px">
-  <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:28px 24px;max-width:340px;width:100%;position:relative">
-    <button onclick="document.getElementById('about-modal').style.display='none'" style="position:absolute;top:16px;right:16px;font-size:20px;color:var(--muted);background:none;border:none">✕</button>
-    <div style="text-align:center;margin-bottom:20px">
-      <div style="font-size:40px;margin-bottom:8px">💊</div>
-      <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 16 · 2025</div>
-    </div>
-    <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
-      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
-      <div style="font-size:18px;font-weight:800;color:var(--accent)">Astastarial</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">github.com/astastarial168-alt</div>
-    </div>
-    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:16px">
-      © 2025 Astastarial. All rights reserved.<br>
-      This app, its design, code, and concept are the intellectual property of the creator.<br><br>
-      Unauthorized copying, redistribution, or claiming ownership of this app is strictly prohibited.
-    </div>
-    <div style="font-size:11px;color:var(--muted);background:var(--card2);border-radius:10px;padding:10px 12px;margin-bottom:16px">
-      🔒 <strong style="color:var(--text)">Privacy First</strong> — Your medical documents are processed securely and never stored on any server.
-    </div>
-    <button onclick="document.getElementById('about-modal').style.display='none'" class="btn-primary" style="width:100%">Close</button>
-  </div>
-</div>
-
 </body>
 </html>
