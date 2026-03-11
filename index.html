@@ -416,19 +416,21 @@ const PROXY_URL = state.proxyUrl || 'https://api.groq.com/openai/v1/chat/complet
 async function groqRequest(body, key) {
   const proxyUrl = localStorage.getItem('medbill_proxy') || '';
   const endpoint = proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
-  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
+  // If using proxy: no auth header needed (worker has the secret key)
+  // If direct: send key in header
+  const headers = proxyUrl
+    ? { 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
 
-  // Try fetch
   try {
     const res = await fetch(endpoint, { method: 'POST', mode: 'cors', headers, body });
     const data = await res.json();
     return data;
   } catch(e) {
-    // Try XHR fallback
     try {
       return await xhrPost(endpoint, headers, body);
     } catch(e2) {
-      throw new Error('Cannot reach API. ' + (proxyUrl ? 'Proxy error: ' : 'Set up proxy: ') + e2.message);
+      throw new Error('Cannot reach API: ' + e2.message);
     }
   }
 }
@@ -1321,7 +1323,7 @@ if ('Notification' in window && Notification.permission === 'default') {
     <div style="text-align:center;margin-bottom:20px">
       <div style="font-size:40px;margin-bottom:8px">💊</div>
       <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 15 · 2025</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 16 · 2025</div>
     </div>
     <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
