@@ -255,7 +255,7 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v16 · © Astastarial</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v17 · © Astastarial</span></span>
     <span class="nav-badge" id="nav-badge" style="display:none"></span>
   </nav>
 
@@ -555,6 +555,28 @@ function showAlert(msg, dur=6000) {
   div.innerHTML=`<span style="font-size:20px">💊</span> ${esc(msg)}`;
   document.getElementById('alerts').appendChild(div);
   setTimeout(()=>div.remove(), dur);
+}
+
+/* Suggest timing slots based on medicine frequency string */
+function suggestTimings(frequency, medName) {
+  if (!frequency) return ['Morning - 8:00 AM'];
+  const f = frequency.toLowerCase();
+  if (f.includes('once') || f.includes('1 time') || f.includes('od') || f === '1') {
+    return ['Morning - 8:00 AM'];
+  }
+  if (f.includes('twice') || f.includes('2 time') || f.includes('bd') || f.includes('bid') || f === '2') {
+    return ['Morning - 8:00 AM', 'Night - 9:00 PM'];
+  }
+  if (f.includes('three') || f.includes('3 time') || f.includes('tds') || f.includes('tid') || f === '3') {
+    return ['Morning - 8:00 AM', 'Afternoon - 2:00 PM', 'Night - 9:00 PM'];
+  }
+  if (f.includes('four') || f.includes('4 time') || f.includes('qid') || f === '4') {
+    return ['Morning - 8:00 AM', 'Afternoon - 1:00 PM', 'Evening - 5:00 PM', 'Night - 9:00 PM'];
+  }
+  if (f.includes('morning')) return ['Morning - 8:00 AM'];
+  if (f.includes('night') || f.includes('bedtime')) return ['Night - 9:00 PM'];
+  if (f.includes('afternoon')) return ['Afternoon - 2:00 PM'];
+  return ['Morning - 8:00 AM'];
 }
 
 function parseTime(s) {
@@ -1075,21 +1097,63 @@ function renderRemindersTab() {
       <button class="btn-primary" style="width:auto;padding:9px 14px;font-size:12px" onclick="reqNotif()">Allow</button>
     </div>` : '';
 
-  let items = (state.result.medicines||[]).map(m => {
+  let items = (state.result.medicines||[]).map((m, idx) => {
     const on = state.reminders[m.name];
-    const hasTiming = m.timing?.length>0;
-    const times = (m.timing||[]).map(t=>`<span class="ri-time-chip">⏰ ${esc(t)}</span>`).join('');
+    const hasTiming = m.timing && m.timing.length > 0;
+    const suggested = suggestTimings(m.frequency, m.name);
+    const times = (m.timing||[]).map(t => `<span class="ri-time-chip">⏰ ${esc(t)}</span>`).join('');
     const activeLabel = on ? `<div class="active-label"><span class="pulse-ring"></span>Reminder ON</div>` : '';
+
+    // Build time editor rows
+    const currentTimes = m.timing && m.timing.length > 0 ? m.timing : [];
+    const timeRows = currentTimes.map((t, ti) => {
+      // Parse to HH:MM for input[type=time]
+      const parsed = parseTime(t);
+      const hh = parsed ? String(parsed.h).padStart(2,'0') : '08';
+      const mm = parsed ? String(parsed.min).padStart(2,'0') : '00';
+      return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <input type="time" value="${hh}:${mm}" 
+          style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;color:var(--text);flex:1"
+          onchange="updateMedTime('${esc(m.name)}',${ti},this.value)">
+        <button onclick="removeMedTime('${esc(m.name)}',${ti})" 
+          style="background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.3);border-radius:8px;padding:6px 10px;font-size:14px;color:var(--warn)">✕</button>
+      </div>`;
+    }).join('');
+
+    // Suggested times chips (only show when no timing set)
+    const suggestChips = !hasTiming ? `
+      <div style="margin-bottom:8px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">
+          💡 AI suggests based on <strong style="color:var(--sub)">${esc(m.frequency||'frequency')}</strong>:
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${suggested.map(s => `<button onclick="applySuggestedTime('${esc(m.name)}','${esc(s)}')" 
+            style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;padding:4px 12px;font-size:12px;color:var(--accent)">
+            ⏰ ${esc(s)}</button>`).join('')}
+          <button onclick="applyAllSuggested('${esc(m.name)}')" 
+            style="background:rgba(0,212,170,0.15);border:1px solid var(--aborder);border-radius:99px;padding:4px 12px;font-size:12px;color:var(--accent);font-weight:700">
+            ✅ Apply All</button>
+        </div>
+      </div>` : '';
+
     return `
-    <div class="reminder-item">
-      <div class="ri-info">
-        <div class="ri-name">${esc(m.name)} <span style="color:var(--muted);font-weight:500;font-size:12px">${m.dosage?'• '+esc(m.dosage):''}</span></div>
-        <div class="ri-times">${times||'<span style="font-size:12px;color:var(--muted)">No timing specified</span>'}</div>
-        ${activeLabel}
+    <div class="reminder-item" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div class="ri-name">${esc(m.name)} <span style="color:var(--muted);font-weight:500;font-size:12px">${m.dosage?'• '+esc(m.dosage):''}</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${m.frequency ? esc(m.frequency) : 'Frequency not specified'}</div>
+        </div>
+        <button class="toggle-wrap" style="background:${on?'var(--accent)':'var(--border)'};opacity:${hasTiming||currentTimes.length>0?1:0.4};flex-shrink:0" 
+          ${!hasTiming && currentTimes.length===0?'disabled':''} onclick="toggleReminder('${esc(m.name)}')">
+          <div class="toggle-knob" style="left:${on?'23px':'3px'}"></div>
+        </button>
       </div>
-      <button class="toggle-wrap" style="background:${on?'var(--accent)':'var(--border)'};opacity:${hasTiming?1:0.4}" 
-        ${!hasTiming?'disabled':''} onclick="toggleReminder('${esc(m.name)}')">
-        <div class="toggle-knob" style="left:${on?'23px':'3px'}"></div>
+      ${activeLabel}
+      ${suggestChips}
+      ${timeRows}
+      <button onclick="addMedTime('${esc(m.name)}')" 
+        style="background:var(--card2);border:1px dashed var(--border);border-radius:8px;padding:7px;font-size:12px;color:var(--muted);width:100%;text-align:center">
+        + Add Time Slot
       </button>
     </div>`;
   }).join('');
@@ -1240,6 +1304,62 @@ function resetAll() {
   switchTab('analyze');
 }
 
+/* Update a specific time slot for a medicine */
+function updateMedTime(medName, idx, timeVal) {
+  const med = (state.result.medicines||[]).find(m => m.name === medName);
+  if (!med) return;
+  if (!med.timing) med.timing = [];
+  // Convert HH:MM to label e.g. "08:00" → "Morning - 8:00 AM"
+  const [hStr, mStr] = timeVal.split(':');
+  const h = parseInt(hStr), min = parseInt(mStr);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const timeLabel = `${String(h12)}:${String(min).padStart(2,'0')} ${ampm}`;
+  const period = h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 20 ? 'Evening' : 'Night';
+  med.timing[idx] = `${period} - ${timeLabel}`;
+  // Update reminders toggle availability
+  if (!state.reminders[medName]) state.reminders[medName] = false;
+  saveData();
+  renderRemindersTab();
+}
+
+function removeMedTime(medName, idx) {
+  const med = (state.result.medicines||[]).find(m => m.name === medName);
+  if (!med || !med.timing) return;
+  med.timing.splice(idx, 1);
+  saveData();
+  scheduleReminders();
+  renderRemindersTab();
+}
+
+function addMedTime(medName) {
+  const med = (state.result.medicines||[]).find(m => m.name === medName);
+  if (!med) return;
+  if (!med.timing) med.timing = [];
+  med.timing.push('Morning - 8:00 AM');
+  saveData();
+  renderRemindersTab();
+}
+
+function applySuggestedTime(medName, timeStr) {
+  const med = (state.result.medicines||[]).find(m => m.name === medName);
+  if (!med) return;
+  if (!med.timing) med.timing = [];
+  if (!med.timing.includes(timeStr)) med.timing.push(timeStr);
+  saveData();
+  renderRemindersTab();
+}
+
+function applyAllSuggested(medName) {
+  const med = (state.result.medicines||[]).find(m => m.name === medName);
+  if (!med) return;
+  med.timing = suggestTimings(med.frequency, medName);
+  saveData();
+  scheduleReminders();
+  renderRemindersTab();
+  showAlert('✅ Times set for ' + medName);
+}
+
 function toggleReminder(name) {
   const turningOn = !state.reminders[name];
   if (turningOn && state.notifPerm !== 'granted') {
@@ -1338,7 +1458,7 @@ if ('Notification' in window && Notification.permission === 'default') {
     <div style="text-align:center;margin-bottom:20px">
       <div style="font-size:40px;margin-bottom:8px">💊</div>
       <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 16 · 2025</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 17 · 2025</div>
     </div>
     <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
