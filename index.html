@@ -255,7 +255,10 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v17 · © Astastarial</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v18 · © Astastarial</span></span>
+    <button id="profile-btn" onclick="openProfileModal()" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;padding:4px 10px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:5px;flex-shrink:0">
+      <span id="profile-emoji">👤</span><span id="profile-name-nav" style="max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Me</span>
+    </button>
     <span class="nav-badge" id="nav-badge" style="display:none"></span>
   </nav>
 
@@ -287,6 +290,9 @@ img{display:block;max-width:100%;}
     </button>
     <button class="tabbar-btn" id="tb-reminders" onclick="switchTab('reminders')">
       <span class="tb-icon">⏰</span>Reminders
+    </button>
+    <button class="tabbar-btn" id="tb-calendar" onclick="switchTab('calendar')">
+      <span class="tb-icon">📅</span>Calendar
     </button>
     <button class="tabbar-btn" id="tb-share" onclick="switchTab('share')">
       <span class="tb-icon">🔗</span>Share
@@ -329,6 +335,12 @@ let state = {
   notifPerm: Notification ? Notification.permission : 'denied',
   reminderTimers: [],
   apiKey: localStorage.getItem('groq_api_key') || 'hardcoded',
+  // New features
+  stock: {},        // {medName: {total, remaining, startDate}}
+  takenLog: {},     // {'YYYY-MM-DD': {medName: true/false}}
+  profiles: [],     // [{id, name, emoji, result, reminders, msgs, stock, takenLog}]
+  currentProfileId: null,
+  simpleMode: false, // Explain Like I'm 5
 };
 
 /* ══════════════════════════════════════════
@@ -512,6 +524,18 @@ function fmt(t) { return esc(t).replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').
 /* ── Persist & restore analysis data ── */
 function saveData() {
   try {
+    // Save into current profile first
+    const cur = state.profiles.find(p => p.id === state.currentProfileId);
+    if (cur) {
+      cur.result = state.result;
+      cur.reminders = state.reminders;
+      cur.msgs = state.msgs;
+      cur.stock = state.stock;
+      cur.takenLog = state.takenLog;
+    }
+    localStorage.setItem('medbill_profiles', JSON.stringify(state.profiles));
+    localStorage.setItem('medbill_current_profile', state.currentProfileId || 'me');
+    // Legacy keys for compatibility
     localStorage.setItem('medbill_result', JSON.stringify(state.result));
     localStorage.setItem('medbill_reminders', JSON.stringify(state.reminders));
     localStorage.setItem('medbill_msgs', JSON.stringify(state.msgs));
@@ -555,6 +579,26 @@ function showAlert(msg, dur=6000) {
   div.innerHTML=`<span style="font-size:20px">💊</span> ${esc(msg)}`;
   document.getElementById('alerts').appendChild(div);
   setTimeout(()=>div.remove(), dur);
+}
+
+/* Stock bar HTML helper — avoids nested template literal issues */
+function renderStockBar(medName, frequency) {
+  const stk = state.stock[medName];
+  if (!stk || !stk.total) return '';
+  const dailyDose = frequency ? (frequency.toLowerCase().includes('twice')||frequency.includes('2')?2:frequency.toLowerCase().includes('three')||frequency.includes('3')?3:1) : 1;
+  const daysLeft = Math.round(stk.remaining / dailyDose);
+  const pct = Math.round((stk.remaining / stk.total) * 100);
+  const color = daysLeft <= 3 ? 'var(--warn)' : daysLeft <= 7 ? 'var(--gold)' : 'var(--accent)';
+  return '<div style="background:var(--card2);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">'
+    + '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'
+    + '<span style="color:var(--muted)">💊 Stock: <strong style="color:' + color + '">' + stk.remaining + ' tablets left</strong></span>'
+    + '<span style="color:' + color + '">~' + daysLeft + ' days</span>'
+    + '</div>'
+    + '<div style="background:var(--border);border-radius:99px;height:4px">'
+    + '<div style="background:' + color + ';width:' + pct + '%;height:4px;border-radius:99px"></div>'
+    + '</div>'
+    + (daysLeft <= 5 ? '<div style="color:var(--warn);margin-top:4px">🔔 Refill soon!</div>' : '')
+    + '</div>';
 }
 
 /* Suggest timing slots based on medicine frequency string */
@@ -836,7 +880,7 @@ async function sendChat(override) {
 ══════════════════════════════════════════ */
 function switchTab(tab) {
   state.activeTab = tab;
-  ['analyze','reminders','share','chat'].forEach(t=>{
+  ['analyze','reminders','calendar','share','chat'].forEach(t=>{
     const btn = document.getElementById('tb-'+t);
     if(btn) btn.classList.toggle('active', t===tab);
   });
@@ -848,6 +892,7 @@ function renderContent() {
   switch(state.activeTab) {
     case 'analyze': return renderAnalyzeTab();
     case 'reminders': return renderRemindersTab();
+    case 'calendar': return renderCalendarTab();
     case 'share': return renderShareTab();
     case 'chat': return renderChatTab();
   }
@@ -1149,12 +1194,24 @@ function renderRemindersTab() {
         </button>
       </div>
       ${activeLabel}
+      ${renderStockBar(m.name, m.frequency)}
       ${suggestChips}
       ${timeRows}
       <button onclick="addMedTime('${esc(m.name)}')" 
         style="background:var(--card2);border:1px dashed var(--border);border-radius:8px;padding:7px;font-size:12px;color:var(--muted);width:100%;text-align:center">
         + Add Time Slot
       </button>
+      <!-- Stock Tracker -->
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">📦 Stock Tracker</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="number" min="1" max="999" placeholder="Total tablets" value="${state.stock[m.name]?.total||''}"
+            style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;color:var(--text)"
+            onchange="setStock('${esc(m.name)}',this.value)">
+          <span style="font-size:12px;color:var(--muted)">tablets</span>
+          ${state.stock[m.name]?.total?`<button onclick="markTaken('${esc(m.name)}')" style="background:var(--adim);border:1px solid var(--aborder);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--accent)">✓ Taken</button>`:''}
+        </div>
+      </div>
     </div>`;
   }).join('');
 
@@ -1163,7 +1220,7 @@ function renderRemindersTab() {
     <div class="sec-label">⏰ Medicine Reminders</div>
     <div class="card">
       ${notifBanner}
-      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6">Toggle reminders below. You'll receive notifications and in-app alerts at the right times.</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6">Set times, track stock, and toggle reminders for each medicine.</div>
       ${items}
     </div>
     <div class="disclaimer" style="margin-top:10px">
@@ -1293,6 +1350,271 @@ function clearKey() {
   state.apiKey = '';
   localStorage.removeItem('groq_api_key');
   renderContent();
+}
+
+
+/* ══════════════════════════════════════════
+   EXPLAIN SIMPLY + INTERACTION CHECKER
+══════════════════════════════════════════ */
+async function explainSimple() {
+  if (!state.result) return;
+  showAlert('🧒 Generating simple explanation…');
+  const meds = (state.result.medicines||[]).map(m => m.name + ' ' + (m.dosage||'') + ' ' + (m.frequency||'')).join(', ');
+  const diag = state.result.diagnosis || '';
+  const prompt = 'Explain this prescription to a 10-year-old child or elderly person with no medical knowledge. Use very simple words. No medical jargon. Use emojis. Keep it friendly and clear. Prescription: Diagnosis: ' + diag + '. Medicines: ' + meds + '. Explain what each medicine does in 1 simple sentence.';
+  try {
+    const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 800, temperature: 0.5 });
+    const data = await groqRequest(body, state.apiKey);
+    if (data.error) throw new Error(data.error.message);
+    state.simpleExplanation = data.choices?.[0]?.message?.content || 'Could not generate explanation.';
+    state.simpleMode = true;
+    renderAnalyzeTab();
+  } catch(e) { showAlert('Error: ' + e.message); }
+}
+
+async function checkInteractions() {
+  if (!state.result) return;
+  const meds = (state.result.medicines||[]).map(m => m.name).filter(Boolean);
+  if (meds.length < 2) { showAlert('Need at least 2 medicines to check interactions.'); return; }
+  showAlert('⚠️ Checking interactions between ' + meds.length + ' medicines…');
+  const prompt = 'Check for drug interactions between these medicines: ' + meds.join(', ') + '. For each dangerous or notable interaction, explain: 1) Which medicines interact, 2) What the risk is, 3) What the patient should do. If no dangerous interactions, say so clearly. Be concise and practical. Format with clear sections per interaction.';
+  try {
+    const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 1000, temperature: 0.2 });
+    const data = await groqRequest(body, state.apiKey);
+    if (data.error) throw new Error(data.error.message);
+    state.interactionResult = data.choices?.[0]?.message?.content || 'Could not check interactions.';
+    renderAnalyzeTab();
+  } catch(e) { showAlert('Error: ' + e.message); }
+}
+
+/* ══════════════════════════════════════════
+   STOCK TRACKER
+══════════════════════════════════════════ */
+function setStock(medName, total) {
+  const t = parseInt(total);
+  if (!t || t < 1) return;
+  if (!state.stock[medName]) state.stock[medName] = {};
+  state.stock[medName].total = t;
+  state.stock[medName].remaining = state.stock[medName].remaining || t;
+  state.stock[medName].startDate = state.stock[medName].startDate || new Date().toISOString().split('T')[0];
+  saveData();
+  renderRemindersTab();
+  showAlert('📦 Stock set: ' + t + ' tablets for ' + medName);
+}
+
+function markTaken(medName) {
+  if (!state.stock[medName]) return;
+  if (state.stock[medName].remaining > 0) {
+    state.stock[medName].remaining--;
+    saveData();
+    // Log in takenLog
+    const today = new Date().toISOString().split('T')[0];
+    if (!state.takenLog[today]) state.takenLog[today] = {};
+    state.takenLog[today][medName] = true;
+    saveData();
+    renderRemindersTab();
+    showAlert('✅ Marked taken: ' + medName + ' (' + state.stock[medName].remaining + ' left)');
+  } else {
+    showAlert('⚠️ No tablets left for ' + medName + '. Please refill!');
+  }
+}
+
+/* ══════════════════════════════════════════
+   CALENDAR TAB
+══════════════════════════════════════════ */
+function renderCalendarTab() {
+  const c = document.getElementById('content');
+  if (!state.result) {
+    c.innerHTML = '<div class="card fadeUp" style="margin-top:16px;text-align:center;color:var(--muted);padding:40px">Analyze a bill first to use the calendar.</div>';
+    return;
+  }
+  const meds = (state.result.medicines||[]).filter(m => m.name);
+  const today = new Date();
+  // Show last 7 days + next 3 days
+  const days = [];
+  for (let i = -6; i <= 3; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push(d);
+  }
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Build day columns
+  let calHtml = '<div style="overflow-x:auto;padding-bottom:8px"><table style="border-collapse:collapse;width:100%;min-width:500px">';
+  // Header row
+  calHtml += '<tr><td style="font-size:11px;color:var(--muted);padding:4px 8px;font-weight:700">Medicine</td>';
+  days.forEach(d => {
+    const isToday = d.toDateString() === today.toDateString();
+    const isPast = d < today && !isToday;
+    calHtml += '<td style="text-align:center;padding:4px 2px;min-width:36px">';
+    calHtml += '<div style="font-size:10px;color:var(--muted)">' + dayNames[d.getDay()] + '</div>';
+    calHtml += '<div style="font-size:12px;font-weight:' + (isToday?'800':'500') + ';color:' + (isToday?'var(--accent)':'var(--text)') + '">' + d.getDate() + '</div>';
+    calHtml += '</td>';
+  });
+  calHtml += '</tr>';
+
+  // Medicine rows
+  meds.forEach(m => {
+    calHtml += '<tr style="border-top:1px solid var(--border)">';
+    calHtml += '<td style="font-size:12px;color:var(--text);padding:6px 8px;font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + m.name + '">' + esc(m.name.length > 12 ? m.name.substring(0,12)+'…' : m.name) + '</td>';
+    days.forEach(d => {
+      const dateKey = d.toISOString().split('T')[0];
+      const isToday = d.toDateString() === today.toDateString();
+      const isFuture = d > today && !isToday;
+      const taken = state.takenLog[dateKey] && state.takenLog[dateKey][m.name];
+      const isPast = !isFuture && !isToday;
+      let dot, onclick = '';
+      if (isFuture) {
+        dot = '<div style="width:24px;height:24px;border-radius:50%;background:var(--border);margin:auto"></div>';
+      } else if (taken) {
+        dot = '<div style="width:24px;height:24px;border-radius:50%;background:var(--accent);margin:auto;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer" onclick="toggleTaken(\'' + esc(m.name) + '\',\'' + dateKey + '\')">✓</div>';
+      } else {
+        const col = isPast ? 'rgba(255,107,107,0.4)' : 'rgba(255,209,102,0.3)';
+        dot = '<div style="width:24px;height:24px;border-radius:50%;background:' + col + ';margin:auto;cursor:pointer;border:1px dashed var(--border)" onclick="toggleTaken(\'' + esc(m.name) + '\',\'' + dateKey + '\')"></div>';
+      }
+      calHtml += '<td style="text-align:center;padding:4px 2px">' + dot + '</td>';
+    });
+    calHtml += '</tr>';
+  });
+  calHtml += '</table></div>';
+
+  // Legend
+  const totalToday = meds.length;
+  const takenToday = meds.filter(m => state.takenLog[today.toISOString().split('T')[0]]?.[m.name]).length;
+
+  c.innerHTML = '<div class="fadeUp">' +
+    '<div class="sec-label">📅 Medicine Calendar</div>' +
+    '<div class="card" style="padding:12px">' +
+      '<div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px">' +
+        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--accent);margin-right:4px"></span>Taken</span>' +
+        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(255,107,107,0.4);margin-right:4px"></span>Missed</span>' +
+        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(255,209,102,0.3);margin-right:4px"></span>Today</span>' +
+        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--border);margin-right:4px"></span>Upcoming</span>' +
+      '</div>' +
+      '<div style="background:var(--adim);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px">' +
+        '💊 Today: <strong style="color:var(--accent)">' + takenToday + '/' + totalToday + ' taken</strong>' +
+        (takenToday === totalToday && totalToday > 0 ? ' 🎉 All done!' : '') +
+      '</div>' +
+      calHtml +
+    '</div>' +
+    '<div class="disclaimer" style="margin-top:10px">Tap any circle to mark taken/missed. Tap again to undo.</div>' +
+  '</div>';
+}
+
+function toggleTaken(medName, dateKey) {
+  if (!state.takenLog[dateKey]) state.takenLog[dateKey] = {};
+  state.takenLog[dateKey][medName] = !state.takenLog[dateKey][medName];
+  // Update stock if marking taken today
+  const today = new Date().toISOString().split('T')[0];
+  if (dateKey === today && state.takenLog[dateKey][medName] && state.stock[medName]?.remaining > 0) {
+    state.stock[medName].remaining--;
+  } else if (dateKey === today && !state.takenLog[dateKey][medName] && state.stock[medName]) {
+    state.stock[medName].remaining = Math.min(state.stock[medName].remaining + 1, state.stock[medName].total);
+  }
+  saveData();
+  renderCalendarTab();
+}
+
+/* ══════════════════════════════════════════
+   FAMILY PROFILES
+══════════════════════════════════════════ */
+function loadProfiles() {
+  try {
+    const saved = localStorage.getItem('medbill_profiles');
+    if (saved) state.profiles = JSON.parse(saved);
+    if (!state.profiles.length) {
+      // Create default profile
+      state.profiles = [{ id: 'me', name: 'Me', emoji: '👤', result: null, reminders: {}, msgs: [], stock: {}, takenLog: {} }];
+    }
+    const curId = localStorage.getItem('medbill_current_profile') || 'me';
+    state.currentProfileId = curId;
+    const cur = state.profiles.find(p => p.id === curId) || state.profiles[0];
+    applyProfile(cur);
+    updateNavProfile(cur);
+  } catch(e) { console.warn('Profile load error:', e); }
+}
+
+function saveProfiles() {
+  // Save current state back to current profile
+  const cur = state.profiles.find(p => p.id === state.currentProfileId);
+  if (cur) {
+    cur.result = state.result;
+    cur.reminders = state.reminders;
+    cur.msgs = state.msgs;
+    cur.stock = state.stock;
+    cur.takenLog = state.takenLog;
+  }
+  try { localStorage.setItem('medbill_profiles', JSON.stringify(state.profiles)); } catch(e) {}
+}
+
+function applyProfile(profile) {
+  state.result = profile.result || null;
+  state.reminders = profile.reminders || {};
+  state.msgs = profile.msgs || [];
+  state.stock = profile.stock || {};
+  state.takenLog = profile.takenLog || {};
+  state.shareCode = null;
+  state.file = null;
+  state.simpleMode = false;
+  state.simpleExplanation = null;
+  state.interactionResult = null;
+  if (state.result) {
+    const medCount = state.result.medicines ? state.result.medicines.length : 0;
+    const el = document.getElementById('nav-badge');
+    if (el) { el.style.display = ''; el.textContent = medCount + ' meds'; }
+    document.getElementById('tabbar').style.display = 'flex';
+    scheduleReminders();
+  } else {
+    const el = document.getElementById('nav-badge');
+    if (el) el.style.display = 'none';
+    document.getElementById('tabbar').style.display = 'none';
+  }
+}
+
+function updateNavProfile(profile) {
+  const emojiEl = document.getElementById('profile-emoji');
+  const nameEl = document.getElementById('profile-name-nav');
+  if (emojiEl) emojiEl.textContent = profile.emoji || '👤';
+  if (nameEl) nameEl.textContent = profile.name || 'Me';
+}
+
+function switchProfile(profileId) {
+  // Save current before switching
+  saveProfiles();
+  state.reminderTimers.forEach(clearInterval);
+  state.reminderTimers = [];
+  const profile = state.profiles.find(p => p.id === profileId);
+  if (!profile) return;
+  state.currentProfileId = profileId;
+  localStorage.setItem('medbill_current_profile', profileId);
+  applyProfile(profile);
+  updateNavProfile(profile);
+  closeProfileModal();
+  switchTab('analyze');
+  renderContent();
+  showAlert('👤 Switched to ' + profile.name);
+}
+
+function addProfile(name, emoji) {
+  const id = 'p_' + Date.now();
+  state.profiles.push({ id, name, emoji: emoji||'👤', result: null, reminders: {}, msgs: [], stock: {}, takenLog: {} });
+  saveProfiles();
+  switchProfile(id);
+}
+
+function deleteProfile(profileId) {
+  if (state.profiles.length <= 1) { showAlert('Cannot delete the only profile.'); return; }
+  state.profiles = state.profiles.filter(p => p.id !== profileId);
+  saveProfiles();
+  switchProfile(state.profiles[0].id);
+}
+
+function openProfileModal() {
+  document.getElementById('profile-modal').style.display = 'flex';
+}
+function closeProfileModal() {
+  document.getElementById('profile-modal').style.display = 'none';
 }
 
 function resetAll() {
@@ -1439,16 +1761,45 @@ function copyCode() {
 /* Global file input handler (exposed to HTML) */
 window.handleFile = handleFile;
 
-/* ── Initial render — load saved data first ── */
-loadSavedData();
+function addProfileFromModal() {
+  const name = document.getElementById('new-profile-name').value.trim();
+  const emoji = document.getElementById('new-profile-emoji').value.trim() || '👤';
+  if (!name) { showAlert('Enter a name for the profile'); return; }
+  addProfile(name, emoji);
+  document.getElementById('new-profile-name').value = '';
+}
+
+function renderProfileList() {
+  const el = document.getElementById('profile-list');
+  if (!el) return;
+  el.innerHTML = state.profiles.map(p => {
+    const isCurrent = p.id === state.currentProfileId;
+    const medCount = p.result?.medicines?.length || 0;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;margin-bottom:6px;background:' + (isCurrent ? 'var(--adim)' : 'var(--card2)') + ';border:1px solid ' + (isCurrent ? 'var(--aborder)' : 'var(--border)') + '">'
+      + '<span style="font-size:24px">' + (p.emoji||'👤') + '</span>'
+      + '<div style="flex:1">'
+      + '<div style="font-size:14px;font-weight:700;color:var(--text)">' + esc(p.name) + (isCurrent ? ' <span style="font-size:10px;color:var(--accent)">● Active</span>' : '') + '</div>'
+      + '<div style="font-size:11px;color:var(--muted)">' + (medCount ? medCount + ' medicines saved' : 'No data yet') + '</div>'
+      + '</div>'
+      + (!isCurrent ? '<button onclick="switchProfile(\'' + p.id + '\')" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700">Switch</button>' : '')
+      + (state.profiles.length > 1 && !isCurrent ? '<button onclick="deleteProfile(\'' + p.id + '\')" style="background:rgba(255,107,107,0.15);color:var(--warn);border:1px solid rgba(255,107,107,0.3);border-radius:8px;padding:6px 10px;font-size:12px">✕</button>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function openProfileModal() {
+  renderProfileList();
+  document.getElementById('profile-modal').style.display = 'flex';
+}
+
+/* ── Initial render — load profiles and saved data ── */
+loadProfiles();
+scheduleReminders();
 renderContent();
 
-/* ── Request notification permission on first visit ── */
+/* ── Auto-request notification permission after 3s ── */
 if ('Notification' in window && Notification.permission === 'default') {
-  // Ask after 3 seconds so page loads first
-  setTimeout(() => {
-    Notification.requestPermission().then(p => { state.notifPerm = p; });
-  }, 3000);
+  setTimeout(() => { Notification.requestPermission().then(p => { state.notifPerm = p; }); }, 3000);
 }
 </script>
 <!-- About / Ownership Modal -->
@@ -1458,7 +1809,7 @@ if ('Notification' in window && Notification.permission === 'default') {
     <div style="text-align:center;margin-bottom:20px">
       <div style="font-size:40px;margin-bottom:8px">💊</div>
       <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 17 · 2025</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 18 · 2025</div>
     </div>
     <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
@@ -1474,6 +1825,25 @@ if ('Notification' in window && Notification.permission === 'default') {
       🔒 <strong style="color:var(--text)">Privacy First</strong> — Your medical documents are processed securely and never stored on any server.
     </div>
     <button onclick="document.getElementById('about-modal').style.display='none'" class="btn-primary" style="width:100%">Close</button>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div id="profile-modal" onclick="if(event.target===this)closeProfileModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:24px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:24px;max-width:340px;width:100%;max-height:80vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:18px;font-weight:800;color:var(--text)">👨‍👩‍👧‍👦 Family Profiles</div>
+      <button onclick="closeProfileModal()" style="font-size:20px;color:var(--muted);background:none;border:none">✕</button>
+    </div>
+    <div id="profile-list"></div>
+    <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">+ Add New Profile</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="new-profile-emoji" type="text" maxlength="2" value="👤" style="width:48px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:18px;text-align:center;color:var(--text)">
+        <input id="new-profile-name" type="text" placeholder="Name (e.g. Mum, Dad)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:14px;color:var(--text)">
+      </div>
+      <button onclick="addProfileFromModal()" class="btn-primary" style="width:100%">Add Profile</button>
+    </div>
   </div>
 </div>
 
