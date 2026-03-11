@@ -255,7 +255,7 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v9</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v11</span></span>
     <span class="nav-badge" id="nav-badge" style="display:none"></span>
   </nav>
 
@@ -328,15 +328,13 @@ let state = {
   shareCode: null,
   notifPerm: Notification ? Notification.permission : 'denied',
   reminderTimers: [],
-  apiKey: localStorage.getItem('gemini_api_key') || '',
-  detectedModel: localStorage.getItem('gemini_model') || '',
+  apiKey: localStorage.getItem('groq_api_key') || '',
 };
 
 /* ══════════════════════════════════════════
-   GEMINI API
+   GROQ API (Free, no quota issues)
 ══════════════════════════════════════════ */
 
-// Compress image to under 200KB base64 (safe for all browsers + Gemini)
 async function compressImage(base64, mimeType) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -350,13 +348,12 @@ async function compressImage(base64, mimeType) {
       }
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      let quality = 0.8;
-      let result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+      let quality = 0.8, result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
       while (result.length > 1000000 && quality > 0.2) {
         quality = Math.round((quality - 0.1) * 10) / 10;
         result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
       }
-      console.log('Image size after compression:', Math.round(result.length / 1024) + 'KB at quality', quality);
+      console.log('Compressed:', Math.round(result.length/1024) + 'KB at q=' + quality);
       resolve({ base64: result, mimeType: 'image/jpeg' });
     };
     img.onerror = () => resolve({ base64, mimeType });
@@ -364,93 +361,63 @@ async function compressImage(base64, mimeType) {
   });
 }
 
-async function callGemini(base64, mimeType, prompt) {
+async function callGroq(base64, mimeType, prompt) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
 
-  // Try models in order until one works
-  const modelsToTry = state.detectedModel
-    ? [state.detectedModel]
-    : ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro-vision'];
+  const imageUrl = 'data:' + mimeType + ';base64,' + base64;
 
-  const bodyObj = {
-    contents: [{
+  const body = JSON.stringify({
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    messages: [{
       role: 'user',
-      parts: [
-        { inline_data: { mime_type: mimeType, data: base64 } },
-        { text: prompt }
+      content: [
+        { type: 'image_url', image_url: { url: imageUrl } },
+        { type: 'text', text: prompt }
       ]
     }],
-    generationConfig: { maxOutputTokens: 2048, temperature: 0.1 }
-  };
-  const body = JSON.stringify(bodyObj);
-  const bodySizeKB = Math.round(body.length / 1024);
-  console.log('Request body:', bodySizeKB + 'KB');
-
-  let lastError = '';
-  for (const model of modelsToTry) {
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
-    console.log('Trying model:', model);
-    let res, data;
-    try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body
-      });
-      data = await res.json();
-    } catch(e) {
-      lastError = 'Fetch failed (' + bodySizeKB + 'KB body): ' + e.message;
-      console.warn('Model', model, 'fetch failed:', e.message);
-      continue;
-    }
-    if (data.error) {
-      lastError = data.error.message || JSON.stringify(data.error);
-      console.warn('Model', model, 'error:', lastError);
-      // If not a model-not-found error, stop trying
-      if (!lastError.includes('not found') && !lastError.includes('not supported')) {
-        throw new Error(lastError);
-      }
-      continue;
-    }
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      lastError = 'Empty response (finishReason: ' + (data.candidates?.[0]?.finishReason || 'unknown') + ')';
-      continue;
-    }
-    // Success - save this model for future use
-    if (!state.detectedModel) { state.detectedModel = model; localStorage.setItem('gemini_model', model); }
-    console.log('Success with model:', model);
-    return text;
-  }
-  throw new Error(lastError || 'All models failed. Check your API key.');
-}
-
-async function callGeminiChat(messages, systemContext) {
-  const key = state.apiKey;
-  if (!key) throw new Error('NO_KEY');
-  const model = state.detectedModel || 'gemini-2.0-flash';
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
-  const contents = [];
-  messages.forEach((m, i) => {
-    contents.push({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: (i === 0 && m.role === 'user') ? (systemContext + '\n\n' + m.content) : m.content }]
-    });
+    max_tokens: 2048,
+    temperature: 0.1
   });
+
+  console.log('Calling Groq, body:', Math.round(body.length/1024) + 'KB');
+
   let res;
   try {
-    res = await fetch(url, {
+    res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1024, temperature: 0.3 } })
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + key
+      },
+      body: body
     });
   } catch(e) {
-    throw new Error('Network error: ' + e.message);
+    throw new Error('Network error: ' + e.message + '. Try disabling extensions or switching networks.');
   }
+
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, no response.';
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error('Empty response from Groq');
+  return text;
+}
+
+async function callGroqChat(messages, systemContext) {
+  const key = state.apiKey;
+  if (!key) throw new Error('NO_KEY');
+
+  const groqMessages = [{ role: 'system', content: systemContext }];
+  messages.forEach(m => groqMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: groqMessages, max_tokens: 1024, temperature: 0.3 })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return data.choices?.[0]?.message?.content || 'Sorry, no response.';
 }
 
 function extractJSON(raw) {
@@ -464,7 +431,7 @@ function extractJSON(raw) {
 
 function saveApiKey(k) {
   state.apiKey = k.trim();
-  localStorage.setItem('gemini_api_key', state.apiKey);
+  localStorage.setItem('groq_api_key', state.apiKey);
 }
 function saveModel(m) {
   state.detectedModel = m;
@@ -645,7 +612,7 @@ Rules:
 - Mark abnormal lab values clearly in status field
 - If not a medical document at all: {"error":"Not a medical document"}`;
 
-    const raw = await callGemini(b64, mime, prompt);
+    const raw = await callGroq(b64, mime, prompt);
     const parsed = extractJSON(raw);
 
     if (parsed.error) {
@@ -740,7 +707,7 @@ async function sendChat(override) {
 
   try {
     const sysCtx = 'You are a friendly medical assistant. You can explain medicines, lab test results, normal ranges, what abnormal values mean, and general health advice. Always recommend consulting a doctor for diagnosis or treatment. Context: ' + ctx;
-    const reply = await callGeminiChat(state.msgs, sysCtx);
+    const reply = await callGroqChat(state.msgs, sysCtx);
     state.msgs.push({ role: 'assistant', content: reply });
   } catch(e) {
     const errMsg = e.message === 'NO_KEY' ? 'Please set your Gemini API key first.' : 'Error: ' + e.message;
@@ -874,29 +841,27 @@ function renderHero() {
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <span style="font-size:22px">🔑</span>
       <div>
-        <div style="font-size:14px;font-weight:800;color:var(--gold)">Gemini API Key Required</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">Free from Google — takes 1 minute to get</div>
+        <div style="font-size:14px;font-weight:800;color:var(--gold)">Groq API Key Required</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">100% Free · No quota issues · No credit card</div>
       </div>
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.6">
-      1. Go to <strong style="color:var(--accent)">aistudio.google.com</strong><br>
-      2. Sign in with Google → click <strong style="color:var(--text)">"Get API Key"</strong><br>
+      1. Go to <strong style="color:var(--accent)">console.groq.com</strong><br>
+      2. Sign up free → click <strong style="color:var(--text)">"API Keys"</strong> → Create<br>
       3. Copy the key and paste below 👇
     </div>
     <div style="display:flex;gap:8px">
-      <input id="key-input" type="password" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);font-family:monospace" placeholder="AIza...">
+      <input id="key-input" type="password" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);font-family:monospace" placeholder="gsk_...">
       <button class="btn-primary" style="width:auto;padding:11px 16px;font-size:13px" onclick="applyKey()">Save</button>
     </div>
     <div id="model-test-result" style="margin-top:8px;font-size:12px;display:none;padding:8px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--border)"></div>
     <div style="margin-top:8px;display:flex;gap:8px;justify-content:center">
-      <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">→ Open Google AI Studio</a>
-      <span style="color:var(--border)">|</span>
-      <button onclick="testAndDetectModel()" style="color:var(--accent);font-size:12px;background:none;border:none;text-decoration:underline;cursor:pointer">🔍 Test & detect model</button>
+      <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">→ Open Groq Console (Free)</a>
     </div>
   </div>` : `
   <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
     <span style="font-size:16px">✅</span>
-    <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">Gemini API connected</span>
+    <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">Groq AI connected ⚡</span>
     <button onclick="clearKey()" style="font-size:12px;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:8px;padding:4px 10px">Change</button>
   </div>`;
 
@@ -1137,50 +1102,6 @@ function scrollChatBottom() {
 /* ══════════════════════════════════════════
    ACTIONS
 ══════════════════════════════════════════ */
-async function testAndDetectModel() {
-  const keyEl = document.getElementById('key-input');
-  const key = keyEl ? keyEl.value.trim() : state.apiKey;
-  if (!key) { alert('Paste your API key first'); return; }
-  const resEl = document.getElementById('model-test-result');
-  if (resEl) { resEl.style.display = ''; resEl.textContent = '🔄 Testing key & finding available models...'; }
-
-  const MODELS = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-pro',
-    'gemini-pro-vision'
-  ];
-
-  // First list available models
-  try {
-    const listRes = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + key);
-    const listData = await listRes.json();
-    if (listData.error) {
-      if (resEl) resEl.textContent = '❌ Key error: ' + listData.error.message;
-      return;
-    }
-    const available = (listData.models || [])
-      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-      .map(m => m.name.replace('models/', ''));
-    if (resEl) resEl.textContent = '✅ Available models: ' + (available.join(', ') || 'none found');
-
-    // Auto-pick best model and save
-    const preferred = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro-vision'];
-    for (const pref of preferred) {
-      if (available.includes(pref)) {
-        state.detectedModel = pref;
-        saveModel(pref);
-        if (resEl) resEl.textContent += ' | ✅ Auto-selected: ' + pref + ' (saved)';
-        break;
-      }
-    }
-  } catch(e) {
-    if (resEl) resEl.textContent = '❌ ' + e.message;
-  }
-}
-
 function applyKey() {
   const el = document.getElementById('key-input');
   const k = el ? el.value.trim() : '';
@@ -1192,7 +1113,7 @@ function applyKey() {
 
 function clearKey() {
   state.apiKey = '';
-  localStorage.removeItem('gemini_api_key');
+  localStorage.removeItem('groq_api_key');
   renderContent();
 }
 
