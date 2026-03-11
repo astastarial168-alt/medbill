@@ -255,7 +255,7 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v6</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v9</span></span>
     <span class="nav-badge" id="nav-badge" style="display:none"></span>
   </nav>
 
@@ -332,26 +332,32 @@ let state = {
   detectedModel: localStorage.getItem('gemini_model') || '',
 };
 
-/* ══════════════════════════════════
+/* ══════════════════════════════════════════
    GEMINI API
-═══════════════════════════════════ */
+══════════════════════════════════════════ */
 
-// Compress image to max 1MB before sending to Gemini
+// Compress image to under 200KB base64 (safe for all browsers + Gemini)
 async function compressImage(base64, mimeType) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let w = img.width, h = img.height;
-      const MAX = 1200;
+      const MAX = 1024;
       if (w > MAX || h > MAX) {
         if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
         else { w = Math.round(w * MAX / h); h = MAX; }
       }
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const compressed = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-      resolve({ base64: compressed, mimeType: 'image/jpeg' });
+      let quality = 0.8;
+      let result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+      while (result.length > 1000000 && quality > 0.2) {
+        quality = Math.round((quality - 0.1) * 10) / 10;
+        result = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+      }
+      console.log('Image size after compression:', Math.round(result.length / 1024) + 'KB at quality', quality);
+      resolve({ base64: result, mimeType: 'image/jpeg' });
     };
     img.onerror = () => resolve({ base64, mimeType });
     img.src = 'data:' + mimeType + ';base64,' + base64;
@@ -361,9 +367,13 @@ async function compressImage(base64, mimeType) {
 async function callGemini(base64, mimeType, prompt) {
   const key = state.apiKey;
   if (!key) throw new Error('NO_KEY');
-  const model = state.detectedModel || 'gemini-2.0-flash';
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
-  const body = {
+
+  // Try models in order until one works
+  const modelsToTry = state.detectedModel
+    ? [state.detectedModel]
+    : ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro-vision'];
+
+  const bodyObj = {
     contents: [{
       role: 'user',
       parts: [
@@ -373,16 +383,47 @@ async function callGemini(base64, mimeType, prompt) {
     }],
     generationConfig: { maxOutputTokens: 2048, temperature: 0.1 }
   };
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Empty response from Gemini. Key may be invalid.');
-  return text;
+  const body = JSON.stringify(bodyObj);
+  const bodySizeKB = Math.round(body.length / 1024);
+  console.log('Request body:', bodySizeKB + 'KB');
+
+  let lastError = '';
+  for (const model of modelsToTry) {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
+    console.log('Trying model:', model);
+    let res, data;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body
+      });
+      data = await res.json();
+    } catch(e) {
+      lastError = 'Fetch failed (' + bodySizeKB + 'KB body): ' + e.message;
+      console.warn('Model', model, 'fetch failed:', e.message);
+      continue;
+    }
+    if (data.error) {
+      lastError = data.error.message || JSON.stringify(data.error);
+      console.warn('Model', model, 'error:', lastError);
+      // If not a model-not-found error, stop trying
+      if (!lastError.includes('not found') && !lastError.includes('not supported')) {
+        throw new Error(lastError);
+      }
+      continue;
+    }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      lastError = 'Empty response (finishReason: ' + (data.candidates?.[0]?.finishReason || 'unknown') + ')';
+      continue;
+    }
+    // Success - save this model for future use
+    if (!state.detectedModel) { state.detectedModel = model; localStorage.setItem('gemini_model', model); }
+    console.log('Success with model:', model);
+    return text;
+  }
+  throw new Error(lastError || 'All models failed. Check your API key.');
 }
 
 async function callGeminiChat(messages, systemContext) {
@@ -390,7 +431,6 @@ async function callGeminiChat(messages, systemContext) {
   if (!key) throw new Error('NO_KEY');
   const model = state.detectedModel || 'gemini-2.0-flash';
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
-  // Build contents - alternate user/model
   const contents = [];
   messages.forEach((m, i) => {
     contents.push({
@@ -398,11 +438,16 @@ async function callGeminiChat(messages, systemContext) {
       parts: [{ text: (i === 0 && m.role === 'user') ? (systemContext + '\n\n' + m.content) : m.content }]
     });
   });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1024, temperature: 0.3 } })
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1024, temperature: 0.3 } })
+    });
+  } catch(e) {
+    throw new Error('Network error: ' + e.message);
+  }
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, no response.';
@@ -539,17 +584,66 @@ async function analyze() {
       mime = compressed.mimeType;
     }
 
-    const prompt = `You are a medical document analyzer. Look at this medical bill or prescription image carefully.
+    const prompt = `You are an expert medical document analyzer. Carefully read this document — it may be a PRESCRIPTION, LAB REPORT, BLOOD TEST, PATHOLOGY REPORT, DISCHARGE SUMMARY, or MEDICAL BILL.
 
-Extract ALL medicines and health information. Return ONLY a valid JSON object - no markdown, no explanation, just the raw JSON:
+Determine the document type and extract ALL information. Return ONLY a single valid JSON object with NO markdown, NO explanation:
 
-{"patient_name":null,"doctor_name":null,"hospital":null,"date":null,"diagnosis":null,"medicines":[{"name":"MedicineName","generic_name":null,"category":"Antibiotic","purpose":"treats infection","dosage":"500mg","frequency":"Twice daily","duration":"5 days","form":"Tablet","timing":["Morning - 8:00 AM","Night - 9:00 PM"],"instructions":"Take after food","warnings":[]}],"general_instructions":null,"follow_up":null,"total_amount":null}
+{
+  "document_type": "prescription|lab_report|blood_test|discharge_summary|medical_bill|other",
+  "patient_name": null,
+  "patient_age": null,
+  "patient_gender": null,
+  "doctor_name": null,
+  "hospital": null,
+  "date": null,
+  "diagnosis": null,
+  "medicines": [
+    {
+      "name": "MedicineName",
+      "generic_name": null,
+      "category": "Antibiotic",
+      "purpose": "treats infection",
+      "dosage": "500mg",
+      "frequency": "Twice daily",
+      "duration": "5 days",
+      "form": "Tablet",
+      "timing": ["Morning - 8:00 AM", "Night - 9:00 PM"],
+      "instructions": "Take after food",
+      "warnings": []
+    }
+  ],
+  "lab_results": [
+    {
+      "test_name": "Hemoglobin",
+      "value": "11.2",
+      "unit": "g/dL",
+      "normal_range": "12.0-16.0",
+      "status": "low|normal|high|borderline",
+      "interpretation": "Slightly below normal, mild anemia"
+    }
+  ],
+  "vitals": {
+    "blood_pressure": null,
+    "pulse": null,
+    "temperature": null,
+    "weight": null,
+    "height": null,
+    "bmi": null,
+    "oxygen_saturation": null
+  },
+  "general_instructions": null,
+  "follow_up": null,
+  "total_amount": null,
+  "summary": "One sentence plain-English summary of the document"
+}
 
 Rules:
-- Return ONLY the JSON object, nothing else
-- Extract every single medicine you can see
-- If timing not stated, suggest based on frequency
-- If not a medical document: {"error":"Not a medical document"}`;
+- Return ONLY the JSON. No other text.
+- For prescriptions: fill medicines array fully, leave lab_results as []
+- For lab reports: fill lab_results fully with status (low/normal/high/borderline), leave medicines as []
+- For discharge summaries: fill both medicines and lab_results if present
+- Mark abnormal lab values clearly in status field
+- If not a medical document at all: {"error":"Not a medical document"}`;
 
     const raw = await callGemini(b64, mime, prompt);
     const parsed = extractJSON(raw);
@@ -564,14 +658,23 @@ Rules:
     state.result = parsed;
     const medCount = parsed.medicines ? parsed.medicines.length : 0;
     const diagPart = parsed.diagnosis ? ' for ' + parsed.diagnosis : '';
-    state.msgs = [{ role: 'assistant', content: 'Hi! Analyzed your ' + (state.file.type === 'pdf' ? 'PDF' : 'medical bill') + '. Found ' + medCount + ' medicine(s)' + diagPart + '. Ask me anything about your medicines! Reminders tab is also available.' }];
+    const docType = parsed.document_type || 'document';
+    const labCount = parsed.lab_results ? parsed.lab_results.length : 0;
+    const abnormal = parsed.lab_results ? parsed.lab_results.filter(l => l.status === 'low' || l.status === 'high').length : 0;
+    let greeting = 'Hi! I analyzed your ' + docType.replace('_',' ') + '.';
+    if (medCount > 0) greeting += ' Found ' + medCount + ' medicine(s).';
+    if (labCount > 0) greeting += ' Found ' + labCount + ' lab test(s)' + (abnormal > 0 ? ' — ⚠️ ' + abnormal + ' abnormal result(s)!' : ' — all in range ✅') + '.';
+    if (parsed.summary) greeting += ' ' + parsed.summary;
+    greeting += ' Ask me anything!';
+    state.msgs = [{ role: 'assistant', content: greeting }];
 
     const r = {};
     (parsed.medicines || []).forEach(m => { r[m.name] = false; });
     state.reminders = r;
 
     document.getElementById('nav-badge').style.display = '';
-    document.getElementById('nav-badge').textContent = medCount + ' meds';
+    const labCount2 = parsed.lab_results ? parsed.lab_results.length : 0;
+    document.getElementById('nav-badge').textContent = medCount > 0 && labCount2 > 0 ? medCount + 'm ' + labCount2 + 'l' : medCount > 0 ? medCount + ' meds' : labCount2 + ' labs';
     document.getElementById('tabbar').style.display = 'flex';
     switchTab('analyze');
 
@@ -632,11 +735,11 @@ async function sendChat(override) {
   renderChat(true);
 
   const ctx = state.result
-    ? `Medicines: ${(state.result.medicines||[]).map(m=>`${m.name} ${m.dosage||''} ${m.frequency||''}`).join('; ')}, Diagnosis: ${state.result.diagnosis||'N/A'}`
+    ? 'Document type: ' + (state.result.document_type||'unknown') + '. Diagnosis: ' + (state.result.diagnosis||'N/A') + '. Medicines: ' + (state.result.medicines||[]).map(m=>m.name+' '+( m.dosage||'')+' '+(m.frequency||'')).join('; ') + '. Lab results: ' + (state.result.lab_results||[]).map(l=>l.test_name+' '+l.value+' '+l.unit+' ('+l.status+')').join('; ')
     : '';
 
   try {
-    const sysCtx = 'You are a friendly medical assistant. Answer questions about medicines clearly and simply. Always remind users to consult their doctor. ' + ctx;
+    const sysCtx = 'You are a friendly medical assistant. You can explain medicines, lab test results, normal ranges, what abnormal values mean, and general health advice. Always recommend consulting a doctor for diagnosis or treatment. Context: ' + ctx;
     const reply = await callGeminiChat(state.msgs, sysCtx);
     state.msgs.push({ role: 'assistant', content: reply });
   } catch(e) {
@@ -694,39 +797,74 @@ function renderAnalyzeTab() {
   }
   // Show results
   const r = state.result;
-  let html = `<div class="fadeUp">`;
+  let html = '<div class="fadeUp">';
+
+  // Document type badge
+  if (r.document_type) {
+    const dtIcons = { prescription:'💊', lab_report:'🧪', blood_test:'🩸', discharge_summary:'🏥', medical_bill:'💰', other:'📄' };
+    const dtLabels = { prescription:'Prescription', lab_report:'Lab Report', blood_test:'Blood Test', discharge_summary:'Discharge Summary', medical_bill:'Medical Bill', other:'Medical Document' };
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:10px 14px;background:var(--adim);border:1px solid var(--aborder);border-radius:12px">'
+      + '<span style="font-size:20px">' + (dtIcons[r.document_type]||'📄') + '</span>'
+      + '<span style="font-size:13px;font-weight:700;color:var(--accent)">' + (dtLabels[r.document_type]||'Medical Document') + '</span>'
+      + (r.summary ? '<span style="font-size:12px;color:var(--muted);margin-left:4px">· ' + esc(r.summary) + '</span>' : '')
+      + '</div>';
+  }
 
   // Patient info
-  if(r.patient_name||r.doctor_name||r.date||r.diagnosis||r.hospital) {
-    html += `<div class="sec-label">Patient Information</div>
-    <div class="card" style="line-height:1.8;font-size:14px;color:var(--sub)">
-      ${r.patient_name?`<div>👤 <strong>Patient:</strong> ${esc(r.patient_name)}</div>`:''}
-      ${r.doctor_name?`<div>🩺 <strong>Doctor:</strong> ${esc(r.doctor_name)}</div>`:''}
-      ${r.hospital?`<div>🏥 <strong>Hospital:</strong> ${esc(r.hospital)}</div>`:''}
-      ${r.date?`<div>📅 <strong>Date:</strong> ${esc(r.date)}</div>`:''}
-      ${r.diagnosis?`<div>🔬 <strong>Diagnosis:</strong> ${esc(r.diagnosis)}</div>`:''}
-      ${r.total_amount?`<div>💰 <strong>Total:</strong> ${esc(r.total_amount)}</div>`:''}
-    </div>`;
+  const hasPatient = r.patient_name||r.doctor_name||r.date||r.diagnosis||r.hospital||r.patient_age||r.patient_gender;
+  if (hasPatient) {
+    html += '<div class="sec-label">Patient Information</div>'
+      + '<div class="card" style="line-height:1.9;font-size:14px;color:var(--sub)">'
+      + (r.patient_name ? '<div>👤 <strong>Patient:</strong> ' + esc(r.patient_name) + (r.patient_age?' · '+esc(r.patient_age):'') + (r.patient_gender?' · '+esc(r.patient_gender):'') + '</div>' : '')
+      + (r.doctor_name ? '<div>🩺 <strong>Doctor:</strong> ' + esc(r.doctor_name) + '</div>' : '')
+      + (r.hospital ? '<div>🏥 <strong>Hospital:</strong> ' + esc(r.hospital) + '</div>' : '')
+      + (r.date ? '<div>📅 <strong>Date:</strong> ' + esc(r.date) + '</div>' : '')
+      + (r.diagnosis ? '<div>🔬 <strong>Diagnosis:</strong> ' + esc(r.diagnosis) + '</div>' : '')
+      + (r.total_amount ? '<div>💰 <strong>Total:</strong> ' + esc(r.total_amount) + '</div>' : '')
+      + '</div>';
+  }
+
+  // Vitals
+  const v = r.vitals || {};
+  const hasVitals = v.blood_pressure||v.pulse||v.temperature||v.weight||v.height||v.bmi||v.oxygen_saturation;
+  if (hasVitals) {
+    html += '<div class="sec-label">❤️ Vitals</div>'
+      + '<div class="card"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      + (v.blood_pressure ? renderVitalItem('🩸','BP', v.blood_pressure) : '')
+      + (v.pulse ? renderVitalItem('💓','Pulse', v.pulse) : '')
+      + (v.temperature ? renderVitalItem('🌡️','Temp', v.temperature) : '')
+      + (v.oxygen_saturation ? renderVitalItem('💨','SpO2', v.oxygen_saturation) : '')
+      + (v.weight ? renderVitalItem('⚖️','Weight', v.weight) : '')
+      + (v.height ? renderVitalItem('📏','Height', v.height) : '')
+      + (v.bmi ? renderVitalItem('📊','BMI', v.bmi) : '')
+      + '</div></div>';
+  }
+
+  // Lab Results
+  if (r.lab_results && r.lab_results.length) {
+    const abnormal = r.lab_results.filter(l => l.status==='low'||l.status==='high').length;
+    html += '<div class="sec-label">🧪 Lab Results (' + r.lab_results.length + ')' + (abnormal?' <span style="color:var(--warn);font-size:11px">⚠️ '+abnormal+' abnormal</span>':'') + '</div>';
+    r.lab_results.forEach(l => { html += renderLabCard(l); });
   }
 
   // Medicines
-  if(r.medicines?.length) {
-    html += `<div class="sec-label">💊 Medicines (${r.medicines.length})</div>`;
+  if (r.medicines && r.medicines.length) {
+    html += '<div class="sec-label">💊 Medicines (' + r.medicines.length + ')</div>';
     r.medicines.forEach(m => { html += renderMedCard(m); });
   }
 
-  if(r.general_instructions) {
-    html += `<div class="sec-label">📋 General Instructions</div>
-    <div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">${esc(r.general_instructions)}</div>`;
+  if (r.general_instructions) {
+    html += '<div class="sec-label">📋 General Instructions</div>'
+      + '<div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">' + esc(r.general_instructions) + '</div>';
   }
-  if(r.follow_up) {
-    html += `<div class="sec-label">🗓 Follow-Up</div>
-    <div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">${esc(r.follow_up)}</div>`;
+  if (r.follow_up) {
+    html += '<div class="sec-label">🗓 Follow-Up</div>'
+      + '<div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">' + esc(r.follow_up) + '</div>';
   }
 
-  html += `<div class="disclaimer">⚕️ For informational purposes only. Always follow your doctor's instructions.</div>`;
-  html += `<button class="btn-outline" style="width:100%;margin-top:16px" onclick="resetAll()">📄 Analyze New Bill</button>`;
-  html += `</div>`;
+  html += '<div class="disclaimer">⚕️ For informational purposes only. Always consult your doctor.</div>';
+  html += '<button class="btn-outline" style="width:100%;margin-top:16px" onclick="resetAll()">📂 Analyze Another Document</button>';
+  html += '</div>';
   c.innerHTML = html;
 }
 
@@ -779,12 +917,12 @@ function renderHero() {
     <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFile(this.files[0])">
     <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" style="${!state.apiKey?'opacity:0.5;pointer-events:none':''}">
       <span class="upload-emoji">🏥</span>
-      <div class="upload-title">Upload Medical Bill</div>
-      <div class="upload-sub">Tap to choose a file from your phone<br>or camera roll</div>
+      <div class="upload-title">Upload Medical Document</div>
+      <div class="upload-sub">Prescription · Lab Report · Blood Test · Medical Bill</div>
       <div class="file-tags">
         <span class="file-tag">.jpg</span><span class="file-tag">.png</span><span class="file-tag">.pdf</span><span class="file-tag">.heic</span>
       </div>
-      <button class="btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">📷 Choose File</button>
+      <button class="btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">📂 Choose File</button>
     </div>
     <div id="err-upload" class="err-box" style="display:none"></div>
     <div class="or-divider">or enter a share code</div>
@@ -810,6 +948,35 @@ function renderUploadWithFile() {
     <button class="btn-primary" style="margin-top:14px" onclick="analyze()">🔍 Analyze Medical Bill</button>
     <div id="err-analyze" class="err-box" style="display:none"></div>
   </div>`;
+}
+
+function renderVitalItem(icon, label, value) {
+  return '<div style="background:var(--card2);border-radius:10px;padding:10px 12px">'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:3px">' + icon + ' ' + label + '</div>'
+    + '<div style="font-size:15px;font-weight:700;color:var(--text)">' + esc(String(value)) + '</div>'
+    + '</div>';
+}
+
+function renderLabCard(l) {
+  const statusColors = { low:'#FF6B6B', high:'#FF6B6B', normal:'#00D4AA', borderline:'#FFD166' };
+  const statusBg = { low:'rgba(255,107,107,0.08)', high:'rgba(255,107,107,0.08)', normal:'rgba(0,212,170,0.07)', borderline:'rgba(255,209,102,0.09)' };
+  const statusIcon = { low:'⬇️', high:'⬆️', normal:'✅', borderline:'⚠️' };
+  const s = (l.status || 'normal').toLowerCase();
+  const color = statusColors[s] || '#9BB0C8';
+  const bg = statusBg[s] || 'transparent';
+  const icon = statusIcon[s] || '🔬';
+  return '<div class="med-card" style="border-left:3px solid ' + color + '">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+    + '<div style="font-size:15px;font-weight:800;color:var(--text)">' + esc(l.test_name||'') + '</div>'
+    + '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;background:' + bg + ';color:' + color + '">' + icon + ' ' + esc((l.status||'').toUpperCase()) + '</span>'
+    + '</div>'
+    + '<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">'
+    + '<span style="font-size:22px;font-weight:800;color:' + color + '">' + esc(l.value||'') + '</span>'
+    + '<span style="font-size:13px;color:var(--muted)">' + esc(l.unit||'') + '</span>'
+    + (l.normal_range ? '<span style="font-size:12px;color:var(--muted);margin-left:8px">Normal: ' + esc(l.normal_range) + '</span>' : '')
+    + '</div>'
+    + (l.interpretation ? '<div style="font-size:13px;color:var(--sub);line-height:1.5;padding:8px 10px;background:var(--card2);border-radius:8px">💡 ' + esc(l.interpretation) + '</div>' : '')
+    + '</div>';
 }
 
 function renderMedCard(m) {
