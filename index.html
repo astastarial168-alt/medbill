@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="MedBill AI"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <title>MedBill AI — by Astastarial</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <!-- PWA Manifest via blob -->
 <script>
@@ -351,8 +352,14 @@ let state = {
 async function pdfToImage(base64) {
   return new Promise(async (resolve, reject) => {
     try {
+      // Wait up to 5 seconds for PDF.js to load
+      let attempts = 0;
+      while (typeof pdfjsLib === 'undefined' && attempts < 50) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
       if (typeof pdfjsLib === 'undefined') {
-        reject(new Error('PDF.js not loaded. Please refresh the page.'));
+        reject(new Error('PDF.js failed to load. Check your internet connection and refresh.'));
         return;
       }
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -426,24 +433,17 @@ function xhrPost(url, headers, body) {
 const PROXY_URL = state.proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
 
 async function groqRequest(body, key) {
-  const proxyUrl = localStorage.getItem('medbill_proxy') || '';
-  const endpoint = proxyUrl || 'https://api.groq.com/openai/v1/chat/completions';
-  // If using proxy: no auth header needed (worker has the secret key)
-  // If direct: send key in header
-  const headers = proxyUrl
-    ? { 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
-
+  // Default to your Cloudflare proxy — users need zero setup
+  const DEFAULT_PROXY = 'https://soft-breeze-f40f.astastarial168.workers.dev';
+  const proxyUrl = localStorage.getItem('medbill_proxy') || DEFAULT_PROXY;
+  const headers = { 'Content-Type': 'application/json' };
   try {
-    const res = await fetch(endpoint, { method: 'POST', mode: 'cors', headers, body });
+    const res = await fetch(proxyUrl, { method: 'POST', mode: 'cors', headers, body });
     const data = await res.json();
     return data;
   } catch(e) {
-    try {
-      return await xhrPost(endpoint, headers, body);
-    } catch(e2) {
-      throw new Error('Cannot reach API: ' + e2.message);
-    }
+    try { return await xhrPost(proxyUrl, headers, body); }
+    catch(e2) { throw new Error('Cannot reach API: ' + e2.message); }
   }
 }
 
@@ -997,25 +997,22 @@ function renderAnalyzeTab() {
 }
 
 function renderHero() {
-  const proxySet = localStorage.getItem('medbill_proxy') || '';
+  const proxySet = localStorage.getItem('medbill_proxy') || 'default';
   const keyBanner = `
   <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:12px 14px;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:${proxySet ? 6 : 10}px">
-      <span style="font-size:16px">${proxySet ? '✅' : '⚠️'}</span>
-      <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">${proxySet ? 'AI Ready — just upload your document!' : 'Enter your Proxy URL to enable AI'}</span>
-      ${proxySet ? `<button onclick="clearProxy()" style="font-size:11px;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 8px">Change</button>` : ''}
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:16px">✅</span>
+      <span style="font-size:13px;color:var(--accent);font-weight:600;flex:1">AI Ready — just upload your document!</span>
+      <button onclick="showProxySettings()" style="font-size:11px;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 8px">⚙️</button>
     </div>
-    ${proxySet
-      ? `<div style="font-size:11px;color:var(--muted);word-break:break-all">🌐 ${proxySet}</div>`
-      : `<div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">
-          Paste your <strong style="color:var(--text)">Cloudflare Worker URL</strong> below.<br>
-          <a href="https://workers.cloudflare.com" target="_blank" style="color:var(--accent)">→ Get free proxy at workers.cloudflare.com</a>
-        </div>
-        <div style="display:flex;gap:6px">
-          <input id="proxy-input" type="text" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--text)" placeholder="https://your-worker.workers.dev">
-          <button onclick="saveProxy()" class="btn-primary" style="width:auto;padding:9px 14px;font-size:12px">Save</button>
-        </div>`
-    }
+    <div id="proxy-settings" style="display:none;margin-top:10px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Custom proxy URL (optional):</div>
+      <div style="display:flex;gap:6px">
+        <input id="proxy-input" type="text" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text)" placeholder="https://your-worker.workers.dev" value="${localStorage.getItem('medbill_proxy')||''}">
+        <button onclick="saveProxy()" class="btn-primary" style="width:auto;padding:8px 12px;font-size:12px">Save</button>
+        ${localStorage.getItem('medbill_proxy') ? '<button onclick="clearProxy()" style="padding:8px 12px;font-size:12px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--muted)">Clear</button>' : ''}
+      </div>
+    </div>
   </div>`;
 
   return `
@@ -1041,7 +1038,7 @@ function renderHero() {
   <div style="padding:0 0 8px">
     ${keyBanner}
     <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFile(this.files[0])">
-    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" style="${!localStorage.getItem('medbill_proxy')?'opacity:0.5;pointer-events:none':''}">
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" style="">
       <span class="upload-emoji">🏥</span>
       <div class="upload-title">Upload Medical Document</div>
       <div class="upload-sub">Prescription · Lab Report · Blood Test · Medical Bill</div>
@@ -1328,6 +1325,11 @@ function applyKey() {
   saveApiKey(k);
   showAlert('✅ API key saved! You can now analyze bills.');
   renderContent();
+}
+
+function showProxySettings() {
+  const el = document.getElementById('proxy-settings');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function saveProxy() {
