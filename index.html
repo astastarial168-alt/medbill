@@ -502,15 +502,37 @@ self.addEventListener('fetch', e => {
   e.respondWith(caches.open('medbill-v1').then(c=>c.match(e.request).then(r=>r||fetch(e.request))));
 })
 `;
-const swBlob = new Blob([swCode], {type:'text/javascript'});
-const swUrl = URL.createObjectURL(swBlob);
-if('serviceWorker' in navigator) {
-  navigator.serviceWorker.register(swUrl);
-  // Listen for messages from Service Worker (e.g. mark medicine taken from notification action)
-  navigator.serviceWorker.addEventListener('message', e => {
+// Register Service Worker
+// On HTTPS (GitHub Pages): try to use a real-path SW for notification support
+// On file:// or fallback: use blob SW for caching only
+if ('serviceWorker' in navigator) {
+  var _swRegistered = false;
+  function _registerBlobSW() {
+    if (_swRegistered) return;
+    var blob = new Blob([swCode], {type:'text/javascript'});
+    var blobUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(blobUrl).then(function(reg) {
+      console.log('SW (blob) registered');
+    }).catch(function(e) { console.log('SW blob failed:', e.message); });
+    _swRegistered = true;
+  }
+  // On HTTPS origins (GitHub Pages, etc): write SW to cache and register from real path
+  if (location.protocol === 'https:') {
+    var swPath = location.pathname.replace(/\/[^/]*$/, '/') + 'sw.js';
+    navigator.serviceWorker.register(swPath).then(function(reg) {
+      console.log('SW (real path) registered at', swPath);
+      _swRegistered = true;
+    }).catch(function() {
+      // sw.js doesn't exist at that path - fall back to blob
+      _registerBlobSW();
+    });
+  } else {
+    _registerBlobSW();
+  }
+  navigator.serviceWorker.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'MARK_TAKEN' && e.data.medName) {
       markTakenFromAlert(e.data.medName);
-      showAlert('\u2705 ' + e.data.medName + ' marked as taken from notification!', 4000);
+      showAlert('\u2705 ' + e.data.medName + ' marked as taken!', 4000);
     }
   });
 }
@@ -936,24 +958,33 @@ function sendSystemNotification(medName, dosage) {
     }
     return;
   }
-  try {
-    var title = '💊 Medicine Time!';
-    var body = 'Take ' + medName + (dosage ? ' - ' + dosage : '') + '. Tap to open app.';
-    var n = new Notification(title, {
-      body: body,
-      tag: 'medbill-' + medName.replace(/[^a-zA-Z0-9]/g, '_'),
-      requireInteraction: true,
-      silent: false,
-      renotify: true
+  var title = '💊 Medicine Time!';
+  var body = 'Take ' + medName + (dosage ? ' - ' + dosage : '') + '. Tap to open.';
+  var opts = {
+    body: body,
+    tag: 'medbill-' + medName.replace(/[^a-zA-Z0-9]/g, '_'),
+    requireInteraction: true,
+    renotify: true,
+    silent: false,
+    vibrate: [500, 200, 500, 200, 800],
+    data: { medName: medName, url: window.location.href }
+  };
+  // Try SW notification first (works on Android when app is backgrounded)
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then(function(reg) {
+      return reg.showNotification(title, opts);
+    }).catch(function() {
+      // SW failed - try direct
+      try { var n = new Notification(title, opts); n.onclick = function(){ window.focus(); n.close(); }; } catch(e) {}
     });
-    n.onclick = function() {
-      try { window.focus(); } catch(ex) {}
-      n.close();
-    };
-    setTimeout(function() { try { n.close(); } catch(ex) {} }, 120000);
-  } catch(e) {
-    console.warn('Notification error:', e.message);
+    return;
   }
+  // Direct notification (works on desktop + Android when tab is open)
+  try {
+    var n = new Notification(title, opts);
+    n.onclick = function() { try { window.focus(); } catch(ex) {} n.close(); };
+    setTimeout(function() { try { n.close(); } catch(ex) {} }, 120000);
+  } catch(e) { console.warn('Notification:', e.message); }
 }
 function showMedicineAlert(medName, dosage) {
   // Remove any existing alert for same medicine
