@@ -469,14 +469,22 @@ body.light .nav-title span:last-child{color:var(--muted) !important;}
 ══════════════════════════════════════════ */
 const swCode = `
 self.addEventListener('install', e => self.skipWaiting());
-self.addEventListener('activate', e => clients.claim());
+self.addEventListener('activate', e => e.waitUntil(clients.claim()));
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || self.location.origin;
+  e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list => {
+    for (const c of list) { if ('focus' in c) return c.focus(); }
+    if (clients.openWindow) return clients.openWindow(url);
+  }));
+});
 self.addEventListener('fetch', e => {
   if(e.request.url.includes('googleapis.com') || e.request.url.includes('fonts.google')) {
     e.respondWith(fetch(e.request).catch(()=>new Response('offline',{status:503})));
     return;
   }
   e.respondWith(caches.open('medbill-v1').then(c=>c.match(e.request).then(r=>r||fetch(e.request))));
-});
+})
 `;
 const swBlob = new Blob([swCode], {type:'text/javascript'});
 const swUrl = URL.createObjectURL(swBlob);
@@ -812,65 +820,104 @@ function parseTime(s) {
 ══════════════════════════════════════════ */
 let _firedKeys = {};
 
-let _alertAudioCtx = null;
+// Shared AudioContext - unlocked by user gesture (browser security requirement)
+let _sharedAudioCtx = null;
 let _alertSoundInterval = null;
+let _audioUnlocked = false;
+
+function getAudioCtx() {
+  if (!_sharedAudioCtx || _sharedAudioCtx.state === 'closed') {
+    try { _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+  }
+  return _sharedAudioCtx;
+}
+
+// Unlock audio on ANY user interaction (required by Chrome/Safari/mobile)
+function unlockAudio() {
+  if (_audioUnlocked) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const done = () => { _audioUnlocked = true; };
+  if (ctx.state === 'suspended') { ctx.resume().then(done).catch(() => {}); } else { done(); }
+  try {
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.connect(ctx.destination); src.start(0);
+  } catch(e) {}
+}
+['click','touchstart','keydown','pointerdown','scroll'].forEach(ev => {
+  document.addEventListener(ev, unlockAudio, { passive: true });
+});
 
 function playAlertSound(loop = false) {
   stopAlertSound();
   function beep() {
-    try {
-      _alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const ctx = _alertAudioCtx;
-      [0, 0.3, 0.6].forEach(t => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.frequency.value = 880; osc.type = 'sine';
-        gain.gain.setValueAtTime(0.6, ctx.currentTime + t);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.4);
-        osc.start(ctx.currentTime + t);
-        osc.stop(ctx.currentTime + t + 0.4);
-      });
-    } catch(e) {}
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const doBeep = () => {
+      try {
+        const now = ctx.currentTime;
+        [[880,0,0.45],[1047,0.28,0.45],[1319,0.56,0.55]].forEach(([freq,delay,dur]) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now+delay);
+          gain.gain.setValueAtTime(0, now+delay);
+          gain.gain.linearRampToValueAtTime(0.8, now+delay+0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, now+delay+dur);
+          osc.start(now+delay); osc.stop(now+delay+dur+0.05);
+        });
+      } catch(e) {}
+    };
+    if (ctx.state === 'suspended') { ctx.resume().then(doBeep).catch(() => {}); } else { doBeep(); }
   }
   beep();
   if (loop) {
-    _alertSoundInterval = setInterval(beep, 4000); // Repeat every 4 seconds
-    // Auto-stop after 60 seconds
-    setTimeout(stopAlertSound, 60000);
+    _alertSoundInterval = setInterval(beep, 3500);
+    setTimeout(stopAlertSound, 90000);
   }
 }
 
 function stopAlertSound() {
   if (_alertSoundInterval) { clearInterval(_alertSoundInterval); _alertSoundInterval = null; }
-  try { if (_alertAudioCtx) { _alertAudioCtx.close(); _alertAudioCtx = null; } } catch(e) {}
+}
+function fireReminder(medName, dosage) {
+  // 1. Web Audio in-app sound
+  playAlertSound(true);
+  // 2. In-app visual alert card
+  showMedicineAlert(medName, dosage);
+  // 3. System notification bar
+  sendSystemNotification(medName, dosage);
 }
 
-function fireReminder(medName, dosage) {
-  // Play looping sound for 60 seconds
-  playAlertSound(true);
-
-  // Show big medicine alert card
-  showMedicineAlert(medName, dosage);
-
-  // Device notification bar — stays until dismissed
-  if (state.notifPerm === 'granted') {
-    try {
-      const n = new Notification('💊 Medicine Time!', {
-        body: 'Take ' + medName + (dosage ? ' — ' + dosage : '') + '\nTap to open MedBill AI',
-        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>',
-        badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>',
-        tag: 'med-' + medName,
-        requireInteraction: true,  // Stays in notification bar until user acts
-        silent: false,
-        vibrate: [300, 100, 300, 100, 300]
+function sendSystemNotification(medName, dosage) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const title = '\xf0\x9f\x92\x8a Medicine Time!';
+  const body = 'Take ' + medName + (dosage ? ' \xe2\x80\x94 ' + dosage : '') + '. Tap to open app.';
+  const iconSvg = '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"100\" height=\"100\" rx=\"20\" fill=\"#070D1A\"/><text y=\".85em\" font-size=\"75\" text-anchor=\"middle\" x=\"50\">\xf0\x9f\x92\x8a</text></svg>';
+  const iconUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg);
+  const opts = {
+    body, icon: iconUrl, badge: iconUrl,
+    tag: 'medbill-' + medName.replace(/\s+/g, '_'),
+    requireInteraction: true, silent: false,
+    vibrate: [400, 150, 400, 150, 600],
+    data: { medName, dosage, url: window.location.href }
+  };
+  // Prefer Service Worker notification (works in background on Android)
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(title, opts).catch(() => {
+        try { new Notification(title, opts); } catch(e) {}
       });
-      // Auto-close notification after 60 seconds if not acted on
-      setTimeout(() => { try { n.close(); } catch(e) {} }, 60000);
-    } catch(e) {}
+    }).catch(() => {
+      try { new Notification(title, opts); } catch(e) {}
+    });
+  } else {
+    try { const n = new Notification(title, opts); n.onclick = () => { window.focus(); n.close(); }; }
+    catch(e) {}
   }
 }
-
 // Active medicine alert elements (so we can remove them)
 let _activeAlerts = {};
 
@@ -916,7 +963,7 @@ function buildAlertHTML(medName, dosage, seconds) {
 
 function markTakenFromAlert(medName) {
   stopAlertSound();
-  const today = new Date().toISOString().split('T')[0];
+  const today = (function(){const _d=new Date();return _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-'+String(_d.getDate()).padStart(2,'0');})();
   if (!state.takenLog[today]) state.takenLog[today] = {};
   // Only deduct once per day
   if (!state.takenLog[today][medName]) {
@@ -968,34 +1015,38 @@ function scheduleReminders() {
   _firedKeys = {};
   if (!state.result?.medicines) return;
 
-  const checkId = setInterval(() => {
+  function checkNow() {
     if (!state.result?.medicines) return;
     const now = new Date();
-    const todayKey = now.toISOString().split('T')[0];
-    const hh = now.getHours();
-    const mm = now.getMinutes();
+    const todayKey = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+    const nowMins = now.getHours() * 60 + now.getMinutes();
 
     state.result.medicines.forEach(med => {
       if (!state.reminders[med.name]) return;
       (med.timing || []).forEach(timeStr => {
         const t = parseTime(timeStr);
         if (!t) return;
-        const diff = Math.abs((hh * 60 + mm) - (t.h * 60 + t.min));
-        if (diff <= 1) {
-          const fireKey = med.name + '@' + t.h + ':' + t.min + ':' + todayKey;
+        const medMins = t.h * 60 + t.min;
+        // Fire if we're within 0-2 minute window after the scheduled time
+        const diff = nowMins - medMins;
+        if (diff >= 0 && diff <= 2) {
+          const fireKey = med.name + '@' + medMins + ':' + todayKey;
           if (!_firedKeys[fireKey]) {
             _firedKeys[fireKey] = true;
-            setTimeout(() => { delete _firedKeys[fireKey]; }, 180000);
+            setTimeout(() => { delete _firedKeys[fireKey]; }, 600000); // expire after 10min
             fireReminder(med.name, med.dosage);
           }
         }
       });
     });
-  }, 60000);
+  }
 
+  // Poll every 30 seconds (more reliable than 60s for catching exact minute)
+  const checkId = setInterval(checkNow, 30000);
+  // Check immediately after 1 second (catches reminders when page first loads)
+  setTimeout(checkNow, 1000);
   state.reminderTimers.push(checkId);
 }
-
 /* ══════════════════════════════════════════
    FILE HANDLING
 ══════════════════════════════════════════ */
@@ -1439,7 +1490,7 @@ function renderHero() {
       <button class="btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">📂 Choose File</button>
     </div>
     <div id="err-upload" class="err-box" style="display:none"></div>
-    \${renderSavedAnalysesList()}
+    ${renderSavedAnalysesList()}
     <div class="or-divider">or enter a share code</div>
     <div class="code-row">
       <input class="share-input" id="code-input" placeholder="ENTER CODE" maxlength="6" oninput="this.value=this.value.toUpperCase()">
@@ -1634,9 +1685,10 @@ function renderRemindersTab() {
     </div>
     <div style="background:rgba(255,209,102,0.08);border:1px solid rgba(255,209,102,0.2);border-radius:14px;padding:14px;margin-top:10px;font-size:12px;color:var(--muted);line-height:1.8">
       <div style="font-weight:700;color:var(--gold);margin-bottom:6px">⚠️ Important — How Reminders Work</div>
-      <div>✅ <strong style="color:var(--text)">Tab must stay open</strong> — reminders only fire while this tab is open in your browser</div>
-      <div>✅ <strong style="color:var(--text)">Add to Home Screen</strong> — keeps app alive longer on Android</div>
-      <div>✅ <strong style="color:var(--text)">Keep screen on</strong> or plug in charger near medicine time</div>
+      <div>🔔 <strong style="color:var(--text)">Allow Notifications</strong> — tap Allow button above for system alerts + sound</div>
+      <div>💊 <strong style="color:var(--text)">Sound plays automatically</strong> — interact with the app first so browser allows audio</div>
+      <div>📱 <strong style="color:var(--text)">Add to Home Screen</strong> — keeps app alive in background on Android</div>
+      <div>✅ <strong style="color:var(--text)">Tab must stay open</strong> — or use Add to Home Screen for background alerts</div>
       <div style="margin-top:8px">Notification status: <strong style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">${state.notifPerm==='granted'?'✅ Allowed':'❌ '+state.notifPerm}</strong></div>
     </div>
   </div>`;
@@ -1894,7 +1946,7 @@ function markTaken(medName) {
     state.stock[medName].remaining--;
     saveData();
     // Log in takenLog
-    const today = new Date().toISOString().split('T')[0];
+    const today = (function(){const _d=new Date();return _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-'+String(_d.getDate()).padStart(2,'0');})();
     if (!state.takenLog[today]) state.takenLog[today] = {};
     state.takenLog[today][medName] = true;
     saveData();
@@ -1920,7 +1972,7 @@ function renderCalendarTab() {
   const meds = (state.result.medicines||[]).filter(m => m.name);
   const today = new Date();
   today.setHours(0,0,0,0);
-  const todayKey = today.toISOString().split('T')[0];
+  const todayKey = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   const upcomingDays = [];
@@ -1940,7 +1992,7 @@ function renderCalendarTab() {
   let streak = 0;
   for (let i = 1; i <= 60; i++) {
     const d = new Date(today); d.setDate(today.getDate() - i);
-    const dk = d.toISOString().split('T')[0];
+    const dk = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     if (meds.length > 0 && meds.every(m => state.takenLog[dk]?.[m.name])) streak++;
     else break;
   }
@@ -1960,7 +2012,7 @@ function renderCalendarTab() {
     let s = 0;
     for (let i = 1; i <= 60; i++) {
       const d2 = new Date(today); d2.setDate(today.getDate() - i);
-      const dk2 = d2.toISOString().split('T')[0];
+      const dk2 = d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0')+'-'+String(d2.getDate()).padStart(2,'0');
       if (pMeds.every(m => pLog[dk2]?.[m.name])) s++;
       else break;
     }
@@ -1992,7 +2044,7 @@ function renderCalendarTab() {
       h += '<tr style="border-top:1px solid var(--border)">';
       h += '<td style="font-size:12px;color:var(--text);padding:7px 8px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px" title="'+esc(m.name)+'">'+esc(m.name.length>12?m.name.substring(0,12)+'\u2026':m.name)+'</td>';
       days.forEach(d => {
-        const dk = d.toISOString().split('T')[0];
+        const dk = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
         const isToday = d.toDateString() === today.toDateString();
         const isFuture = d > today;
         const taken = state.takenLog[dk]?.[m.name];
@@ -2090,7 +2142,7 @@ function toggleTaken(medName, dateKey) {
   if (!state.takenLog[dateKey]) state.takenLog[dateKey] = {};
   const wasTaken = state.takenLog[dateKey][medName];
   state.takenLog[dateKey][medName] = !wasTaken;
-  const today = new Date().toISOString().split('T')[0];
+  const today = (function(){const _d=new Date();return _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-'+String(_d.getDate()).padStart(2,'0');})();
   // Auto-deduct stock for today only
   if (dateKey === today) {
     if (!wasTaken && state.stock[medName]?.remaining > 0) {
@@ -2851,6 +2903,31 @@ function loadDemoAnalysis() {
 }
 
 function resetAll() {
+  // Auto-save current analysis before clearing so it appears in history
+  if (state.result) {
+    const r = state.result;
+    const parts = [];
+    if (r.patient_name) parts.push(r.patient_name);
+    const typeLabel = {prescription:'Prescription',lab_report:'Lab Report',blood_test:'Blood Test',
+      discharge_summary:'Discharge',medical_bill:'Bill',other:'Document'}[r.type||r.document_type]||'Document';
+    parts.push(typeLabel);
+    if (r.date) parts.push(r.date);
+    const label = parts.join(' - ');
+    const last = state.savedAnalyses[state.savedAnalyses.length-1];
+    const alreadySaved = last && last.label===label && last.savedAt && (Date.now()-last.savedAt<3600000);
+    if (!alreadySaved) {
+      const entry = {
+        label, savedAt: Date.now(), type: r.document_type||'other',
+        patient_name: r.patient_name||null,
+        medicines: r.medicines||[], lab_results: r.lab_results||[],
+        result: r, reminders: {...state.reminders}, stock: {...state.stock},
+        takenLog: {...state.takenLog}, msgs: [...state.msgs]
+      };
+      state.savedAnalyses.push(entry);
+      localStorage.setItem('medbill_saved_analyses', JSON.stringify(state.savedAnalyses));
+      showAlert('Auto-saved: ' + entry.label, 3000);
+    }
+  }
   state.file=null; state.result=null; state.msgs=[]; state.shareCode=null; state.reminders={};
   state.reminderTimers.forEach(clearInterval); state.reminderTimers=[];
   clearSavedData();
@@ -2943,26 +3020,33 @@ function showNotifHelp() {
 
 function reqNotif() {
   if (!('Notification' in window)) {
-    showAlert('Your browser does not support notifications. Try Chrome on Android.');
+    showAlert('\xe2\x9d\x8c Your browser does not support notifications. Use Chrome on Android for best experience.');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    // Already granted - play test to confirm audio works too
+    showAlert('\xe2\x9c\x85 Notifications already enabled! Testing sound...');
+    setTimeout(() => fireReminder('Test Medicine', '1 tablet'), 500);
     return;
   }
   if (Notification.permission === 'denied') {
-    showAlert('❌ Notifications blocked by browser. Tap "How to enable?" for steps.');
+    showAlert('\xe2\x9d\x8c Notifications blocked. Tap "How to enable?" for steps.');
     renderRemindersTab();
     return;
   }
   Notification.requestPermission().then(p => {
     state.notifPerm = p;
     if (p === 'granted') {
-      showAlert('✅ Notifications enabled!');
-      fireReminder('MedBill AI Test', 'Reminders are now working!');
+      showAlert('\xe2\x9c\x85 Notifications enabled! You\'ll get system alerts at medicine time.');
+      setTimeout(() => fireReminder('MedBill AI', 'Reminders are now working!'), 800);
     } else if (p === 'denied') {
-      showAlert('❌ Blocked. Tap "How to enable?" button for steps.');
+      showAlert('\xe2\x9d\x8c Blocked. Tap "How to enable?" for steps to fix this.');
+    } else {
+      showAlert('\xe2\x9a\xa0\xef\xb8\x8f Notifications not enabled. You can try again from the Reminders tab.');
     }
     renderRemindersTab();
   });
 }
-
 function loadCode() {
   const el = document.getElementById('code-input');
   if(!el) return;
