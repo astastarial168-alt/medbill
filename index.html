@@ -1609,36 +1609,26 @@ function renderRemindersTab() {
   const c = document.getElementById('content');
   if(!state.result) { c.innerHTML='<div class="card fadeUp" style="margin-top:16px;text-align:center;color:var(--muted);padding:40px">Upload a bill first to set reminders</div>'; return; }
 
-  const notifBanner = `
-    <div style="background:${state.notifPerm==='granted'?'rgba(0,212,170,0.08)':'rgba(255,107,107,0.08)'};border:1px solid ${state.notifPerm==='granted'?'var(--aborder)':'rgba(255,107,107,0.3)'};border-radius:16px;padding:16px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:${state.notifPerm==='granted'?'0':'12px'}">
-        <span style="font-size:28px">${state.notifPerm==='granted'?'\xf0\x9f\x94\x94':'\xf0\x9f\x94\x95'}</span>
-        <div style="flex:1">
-          <div style="font-size:14px;font-weight:800;color:var(--text)">System Notifications: <span style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">\xe2\x80\x8e${state.notifPerm==='granted'?'\xe2\x9c\x85 Enabled':'\xe2\x9d\x8c '+state.notifPerm}</span></div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">${state.notifPerm==='granted'?'Alerts will appear in your device notification bar':'Enable to get alerts even when app is in background'}</div>
-        </div>
-      </div>
-      ${state.notifPerm!=='granted' ? `
-      <button onclick="reqNotif()" style="width:100%;background:linear-gradient(135deg,#FF6B6B,#ee0979);color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
-        \xf0\x9f\x94\x94 Enable Notifications & Sound
-      </button>
-      <div style="font-size:11px;color:var(--muted);text-align:center">Your browser will ask for permission \xe2\x86\x91</div>
-      ` : `
-      <div style="display:flex;gap:8px;margin-top:12px">
-        <button onclick="setTimeout(()=>fireReminder('Test Medicine','1 tablet'),100)" style="flex:1;background:var(--adim);border:1px solid var(--aborder);border-radius:10px;padding:10px;font-size:13px;color:var(--accent);font-weight:600;cursor:pointer">\xf0\x9f\x94\x94 Test Alert + Sound</button>
-      </div>
-      `}
-      ${state.notifPerm==='denied' ? `<button onclick="showNotifHelp()" style="width:100%;margin-top:8px;background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.3);border-radius:10px;padding:10px;font-size:12px;color:var(--warn);cursor:pointer">\xe2\x9d\x93 How to enable notifications?</button>` : ''}
-      <div id="notif-help" style="display:none;margin-top:10px;background:var(--card2);border-radius:10px;padding:12px;font-size:12px;color:var(--muted);line-height:1.9">
-        <strong style="color:var(--text)">Chrome on Android:</strong><br>
-        1. Tap the \xf0\x9f\x94\x92 lock icon in address bar<br>
-        2. Tap "Site settings" \xe2\x86\x92 Notifications \xe2\x86\x92 Allow<br>
-        3. Reload the page<br><br>
-        <strong style="color:var(--text)">Chrome on Desktop:</strong><br>
-        1. Click the \xf0\x9f\x94\x92 lock icon in address bar<br>
-        2. Set Notifications to "Allow"
-      </div>
-    </div>`;
+  var _nb_granted = state.notifPerm === 'granted';
+  var _nb_denied = state.notifPerm === 'denied';
+  var notifBanner = '<div style="background:' + (_nb_granted ? 'rgba(0,212,170,0.08)' : 'rgba(255,107,107,0.08)') + ';border:1px solid ' + (_nb_granted ? 'var(--aborder)' : 'rgba(255,107,107,0.3)') + ';border-radius:16px;padding:16px;margin-bottom:16px">'
+    + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:' + (_nb_granted ? '0' : '12px') + '">'
+    + '<span style="font-size:28px">' + (_nb_granted ? '\xf0\x9f\x94\x94' : '\xf0\x9f\x94\x95') + '</span>'
+    + '<div style="flex:1">'
+    + '<div style="font-size:14px;font-weight:800;color:var(--text)">Notifications: <span style="color:' + (_nb_granted ? 'var(--accent)' : 'var(--warn)') + '">'
+    + (_nb_granted ? '\xe2\x9c\x85 Enabled' : '\xe2\x9d\x8c ' + state.notifPerm) + '</span></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + (_nb_granted ? 'Alerts will appear in your device notification bar' : 'Enable to get alerts even when app is in background') + '</div>'
+    + '</div></div>'
+    + (!_nb_granted
+      ? '<button onclick="reqNotif()" style="width:100%;background:linear-gradient(135deg,#FF6B6B,#ee0979);color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">\xf0\x9f\x94\x94 Enable Notifications \xe2\x86\x92</button>'
+        + '<div style="font-size:11px;color:var(--muted);text-align:center">Browser will ask for permission</div>'
+      : '<div style="display:flex;gap:8px;margin-top:12px"><button onclick="setTimeout(function(){fireReminder(\'Test Medicine\',\'1 tablet\')},100)" style="flex:1;background:var(--adim);border:1px solid var(--aborder);border-radius:10px;padding:10px;font-size:13px;color:var(--accent);font-weight:600;cursor:pointer">\xf0\x9f\x94\x94 Test Alert + Sound</button></div>'
+    )
+    + (_nb_denied ? '<button onclick="showNotifHelp()" style="width:100%;margin-top:8px;background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.3);border-radius:10px;padding:10px;font-size:12px;color:var(--warn);cursor:pointer">\xe2\x9d\x93 How to enable?</button>' : '')
+    + '<div id="notif-help" style="display:none;margin-top:10px;background:var(--card2);border-radius:10px;padding:12px;font-size:12px;color:var(--muted);line-height:1.9">'
+    + '<strong style="color:var(--text)">Chrome on Android:</strong><br>1. Tap the lock icon in address bar<br>2. Tap Site settings \xe2\x86\x92 Notifications \xe2\x86\x92 Allow<br>3. Reload the page<br><br>'
+    + '<strong style="color:var(--text)">Chrome on Desktop:</strong><br>1. Click lock icon in address bar<br>2. Set Notifications to Allow'
+    + '</div></div>';
 
   let items = (state.result.medicines||[]).map((m, idx) => {
     const on = state.reminders[m.name];
