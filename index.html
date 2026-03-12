@@ -926,43 +926,35 @@ function fireReminder(medName, dosage) {
 }
 
 function sendSystemNotification(medName, dosage) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  const title = '💊 Medicine Time!';
-  const body = 'Take ' + medName + (dosage ? ' — ' + dosage : '') + '. Tap to open the app.';
-  // Use a simple PNG-compatible data URL icon that works across all browsers
-  const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAAA';
-  const opts = {
-    body,
-    tag: 'medbill-' + medName.replace(/[^a-zA-Z0-9]/g, '_'),
-    requireInteraction: true,
-    silent: false,
-    vibrate: [500, 200, 500, 200, 800],
-    data: { medName, dosage, url: window.location.href },
-    actions: [
-      { action: 'taken', title: '✅ Mark Taken' },
-      { action: 'dismiss', title: '✖ Dismiss' }
-    ]
-  };
-  // Try Service Worker first (needed for background notifications on Android/Chrome)
-  const trySW = () => {
-    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-      return navigator.serviceWorker.ready.then(reg => reg.showNotification(title, opts));
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') {
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then(function(p) {
+        state.notifPerm = p;
+        if (p === 'granted') sendSystemNotification(medName, dosage);
+      });
     }
-    return Promise.reject('no-sw');
-  };
-  // Fallback to direct Notification API
-  const tryDirect = () => {
-    try {
-      const n = new Notification(title, { body: opts.body, tag: opts.tag, requireInteraction: true, silent: false });
-      n.onclick = () => { try { window.focus(); } catch(e) {} n.close(); };
-      setTimeout(() => { try { n.close(); } catch(e) {} }, 90000);
-    } catch(e) { console.warn('Notification failed:', e.message); }
-  };
-  trySW().catch(tryDirect);
+    return;
+  }
+  try {
+    var title = '💊 Medicine Time!';
+    var body = 'Take ' + medName + (dosage ? ' - ' + dosage : '') + '. Tap to open app.';
+    var n = new Notification(title, {
+      body: body,
+      tag: 'medbill-' + medName.replace(/[^a-zA-Z0-9]/g, '_'),
+      requireInteraction: true,
+      silent: false,
+      renotify: true
+    });
+    n.onclick = function() {
+      try { window.focus(); } catch(ex) {}
+      n.close();
+    };
+    setTimeout(function() { try { n.close(); } catch(ex) {} }, 120000);
+  } catch(e) {
+    console.warn('Notification error:', e.message);
+  }
 }
-// Active medicine alert elements (so we can remove them)
-let _activeAlerts = {};
-
 function showMedicineAlert(medName, dosage) {
   // Remove any existing alert for same medicine
   dismissMedicineAlert(medName);
@@ -1618,31 +1610,35 @@ function renderRemindersTab() {
   if(!state.result) { c.innerHTML='<div class="card fadeUp" style="margin-top:16px;text-align:center;color:var(--muted);padding:40px">Upload a bill first to set reminders</div>'; return; }
 
   const notifBanner = `
-    <div class="notif-banner" style="flex-direction:column;align-items:stretch;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span class="nb-icon">🔔</span>
+    <div style="background:${state.notifPerm==='granted'?'rgba(0,212,170,0.08)':'rgba(255,107,107,0.08)'};border:1px solid ${state.notifPerm==='granted'?'var(--aborder)':'rgba(255,107,107,0.3)'};border-radius:16px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:${state.notifPerm==='granted'?'0':'12px'}">
+        <span style="font-size:28px">${state.notifPerm==='granted'?'\xf0\x9f\x94\x94':'\xf0\x9f\x94\x95'}</span>
         <div style="flex:1">
-          <div class="nb-title">Notifications: <span style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">
-            ${state.notifPerm==='granted'?'✅ Allowed':'❌ '+state.notifPerm}</span>
-          </div>
-          <div class="nb-sub">Sound + popup alerts when it is medicine time</div>
+          <div style="font-size:14px;font-weight:800;color:var(--text)">System Notifications: <span style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">\xe2\x80\x8e${state.notifPerm==='granted'?'\xe2\x9c\x85 Enabled':'\xe2\x9d\x8c '+state.notifPerm}</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${state.notifPerm==='granted'?'Alerts will appear in your device notification bar':'Enable to get alerts even when app is in background'}</div>
         </div>
-        ${state.notifPerm!=='granted' ? '<button class="btn-primary" style="width:auto;padding:9px 14px;font-size:12px;flex-shrink:0" onclick="reqNotif()">Allow</button>' : ''}
       </div>
-      <div style="display:flex;gap:8px">
-        <button onclick="testReminder()" style="flex:1;background:var(--adim);border:1px solid var(--aborder);border-radius:10px;padding:10px;font-size:13px;color:var(--accent);font-weight:600">
-          🔔 Test Alert Now
-        </button>
-        ${state.notifPerm==='denied' ? '<button onclick="showNotifHelp()" style="flex:1;background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.3);border-radius:10px;padding:10px;font-size:12px;color:var(--warn)">How to enable?</button>' : ''}
+      ${state.notifPerm!=='granted' ? `
+      <button onclick="reqNotif()" style="width:100%;background:linear-gradient(135deg,#FF6B6B,#ee0979);color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
+        \xf0\x9f\x94\x94 Enable Notifications & Sound
+      </button>
+      <div style="font-size:11px;color:var(--muted);text-align:center">Your browser will ask for permission \xe2\x86\x91</div>
+      ` : `
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="setTimeout(()=>fireReminder('Test Medicine','1 tablet'),100)" style="flex:1;background:var(--adim);border:1px solid var(--aborder);border-radius:10px;padding:10px;font-size:13px;color:var(--accent);font-weight:600;cursor:pointer">\xf0\x9f\x94\x94 Test Alert + Sound</button>
       </div>
-      <div id="notif-help" style="display:none;background:var(--card2);border-radius:10px;padding:12px;font-size:12px;color:var(--muted);line-height:1.8">
-        <strong style="color:var(--text)">To enable notifications on Chrome Android:</strong><br>
-        1. Tap the 🔒 lock icon in address bar<br>
-        2. Tap "Site settings"<br>
-        3. Set Notifications → Allow<br>
-        4. Refresh the page
+      `}
+      ${state.notifPerm==='denied' ? `<button onclick="showNotifHelp()" style="width:100%;margin-top:8px;background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.3);border-radius:10px;padding:10px;font-size:12px;color:var(--warn);cursor:pointer">\xe2\x9d\x93 How to enable notifications?</button>` : ''}
+      <div id="notif-help" style="display:none;margin-top:10px;background:var(--card2);border-radius:10px;padding:12px;font-size:12px;color:var(--muted);line-height:1.9">
+        <strong style="color:var(--text)">Chrome on Android:</strong><br>
+        1. Tap the \xf0\x9f\x94\x92 lock icon in address bar<br>
+        2. Tap "Site settings" \xe2\x86\x92 Notifications \xe2\x86\x92 Allow<br>
+        3. Reload the page<br><br>
+        <strong style="color:var(--text)">Chrome on Desktop:</strong><br>
+        1. Click the \xf0\x9f\x94\x92 lock icon in address bar<br>
+        2. Set Notifications to "Allow"
       </div>
-    </div>`;
+    </div>``;
 
   let items = (state.result.medicines||[]).map((m, idx) => {
     const on = state.reminders[m.name];
@@ -2378,38 +2374,44 @@ Write ONLY the spoken script. No headings, no bullet points. Just natural flowin
   }
 }
 
+// Global flag - set to true by stopVoice() to break speakNext() chain
+var _speakingStopped = false;
+
 function doSpeak(text, langCode, lang) {
+  _speakingStopped = false;
   window.speechSynthesis.cancel();
-  // Split into sentences for better pacing
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-  let idx = 0;
+  var sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  var idx = 0;
 
   function speakNext() {
+    if (_speakingStopped) return;  // STOP HERE if cancelled
     if (idx >= sentences.length) {
       showAlert('🔊 Reading complete.', 2000);
       return;
     }
-    const utter = new SpeechSynthesisUtterance(sentences[idx].trim());
+    var utter = new SpeechSynthesisUtterance(sentences[idx].trim());
     utter.lang = langCode;
     utter.rate = 0.82;
     utter.pitch = 1.05;
     utter.volume = 1;
-
-    // Find best voice for language
-    const voices = window.speechSynthesis.getVoices();
-    const match = voices.find(v => v.lang === langCode) ||
-                  voices.find(v => v.lang.startsWith(langCode.split('-')[0])) ||
-                  voices.find(v => v.lang.startsWith('en'));
+    var voices = window.speechSynthesis.getVoices();
+    var match = voices.find(function(v){return v.lang===langCode;}) ||
+                voices.find(function(v){return v.lang.startsWith(langCode.split('-')[0]);}) ||
+                voices.find(function(v){return v.lang.startsWith('en');});
     if (match) utter.voice = match;
-
-    utter.onend = () => { idx++; setTimeout(speakNext, 120); };
-    utter.onerror = () => { idx++; speakNext(); };
+    utter.onend = function() {
+      idx++;
+      if (!_speakingStopped) setTimeout(speakNext, 120);
+    };
+    utter.onerror = function() {
+      idx++;
+      if (!_speakingStopped) speakNext();
+    };
     window.speechSynthesis.speak(utter);
   }
 
-  // Wait for voices to load on first run
   if (window.speechSynthesis.getVoices().length === 0) {
-    window.speechSynthesis.onvoiceschanged = () => { speakNext(); };
+    window.speechSynthesis.onvoiceschanged = function() { if (!_speakingStopped) speakNext(); };
   } else {
     speakNext();
   }
@@ -2417,6 +2419,7 @@ function doSpeak(text, langCode, lang) {
 }
 
 function stopVoice() {
+  _speakingStopped = true;
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   showAlert('⏹ Voice stopped.', 2000);
 }
@@ -3037,26 +3040,33 @@ function applyAllSuggested(medName) {
 }
 
 function toggleReminder(name) {
-  const turningOn = !state.reminders[name];
-  if (turningOn && state.notifPerm !== 'granted') {
-    Notification.requestPermission().then(p => {
-      state.notifPerm = p;
-      state.reminders[name] = true;
-      saveData();
-      scheduleReminders();
-      renderRemindersTab();
-      if (p === 'granted') showAlert('✅ Reminder set for ' + name);
-      else showAlert('⚠️ Reminder set (in-app only — notifications blocked)');
-    });
-    return;
+  var turningOn = !state.reminders[name];
+  if (turningOn) {
+    // Auto-request notification permission when enabling a reminder
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(function(p) {
+        state.notifPerm = p;
+        state.reminders[name] = true;
+        saveData();
+        scheduleReminders();
+        renderRemindersTab();
+        if (p === 'granted') {
+          showAlert('✅ Reminder & notifications enabled for ' + name);
+        } else {
+          showAlert('⚠️ Reminder set (tap Enable Notifications for system alerts)');
+        }
+      });
+      return;
+    }
   }
   state.reminders[name] = !state.reminders[name];
   saveData();
   scheduleReminders();
   renderRemindersTab();
-  if (state.reminders[name]) showAlert('✅ Reminder set for ' + name);
+  if (state.reminders[name]) {
+    showAlert('✅ Reminder set for ' + name + (state.notifPerm === 'granted' ? '' : ' (tap Enable Notifications for system alerts)'));
+  }
 }
-
 function showNotifHelp() {
   const el = document.getElementById('notif-help');
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
@@ -3064,29 +3074,33 @@ function showNotifHelp() {
 
 function reqNotif() {
   if (!('Notification' in window)) {
-    showAlert('\xe2\x9d\x8c Your browser does not support notifications. Use Chrome on Android for best experience.');
+    showAlert('❌ Notifications not supported. Please use Chrome or Edge browser.');
     return;
   }
-  if (Notification.permission === 'granted') {
-    // Already granted - play test to confirm audio works too
-    showAlert('\xe2\x9c\x85 Notifications already enabled! Testing sound...');
-    setTimeout(() => fireReminder('Test Medicine', '1 tablet'), 500);
-    return;
-  }
-  if (Notification.permission === 'denied') {
-    showAlert('\xe2\x9d\x8c Notifications blocked. Tap "How to enable?" for steps.');
+  var perm = Notification.permission;
+  if (perm === 'granted') {
+    state.notifPerm = 'granted';
+    showAlert('✅ Notifications already enabled! Sending a test now...');
+    setTimeout(function() { sendSystemNotification('Test Medicine', '1 tablet - Test Alert'); }, 300);
     renderRemindersTab();
     return;
   }
-  Notification.requestPermission().then(p => {
+  if (perm === 'denied') {
+    showAlert('❌ Notifications blocked by browser. Tap "How to enable?" for steps.');
+    renderRemindersTab();
+    return;
+  }
+  // Request permission
+  Notification.requestPermission().then(function(p) {
     state.notifPerm = p;
     if (p === 'granted') {
-      showAlert('\xe2\x9c\x85 Notifications enabled! You\'ll get system alerts at medicine time.');
-      setTimeout(() => fireReminder('MedBill AI', 'Reminders are now working!'), 800);
+      showAlert('✅ Notifications enabled! Sending a test notification now...');
+      setTimeout(function() { sendSystemNotification('MedBill AI', 'Reminders are now active!'); }, 500);
+      setTimeout(function() { playAlertSound(false); }, 200);
     } else if (p === 'denied') {
-      showAlert('\xe2\x9d\x8c Blocked. Tap "How to enable?" for steps to fix this.');
+      showAlert('❌ Blocked by browser. Tap "How to enable?" below.');
     } else {
-      showAlert('\xe2\x9a\xa0\xef\xb8\x8f Notifications not enabled. You can try again from the Reminders tab.');
+      showAlert('⚠️ Permission not granted. You can try again.');
     }
     renderRemindersTab();
   });
