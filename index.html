@@ -60,6 +60,13 @@ document.head.appendChild(link);
   --warn:#FF6B6B; --gold:#FFD166; --gdim:rgba(255,209,102,0.09);
   --text:#E2EDF8; --muted:#6B82A0; --sub:#9BB0C8;
 }
+/* Light theme */
+body.light{
+  --bg:#F0F4F8; --card:#FFFFFF; --card2:#E8EEF5; --border:#D0DCE8;
+  --accent:#00A882; --adim:rgba(0,168,130,0.10); --aborder:rgba(0,168,130,0.30);
+  --warn:#E05252; --gold:#C89A00; --gdim:rgba(200,154,0,0.09);
+  --text:#0D1B2A; --muted:#5A7290; --sub:#3A5570;
+}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overscroll-behavior:none;}
 body{background:var(--bg);font-family:'Sora',sans-serif;color:var(--text);overflow-x:hidden;}
@@ -274,7 +281,16 @@ img{display:block;max-width:100%;}
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v18 · © Astastarial</span></span>
+    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v21 · © Astastarial</span></span>
+    <button id="theme-btn" onclick="toggleTheme()" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;width:34px;height:34px;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0" title="Toggle theme">🌙</button>
+    <select id="lang-select" onchange="setLanguage(this.value)" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;padding:4px 8px;font-size:11px;color:var(--accent);max-width:72px">
+      <option value="English" ${state&&state.language==='English'?'selected':''}>🇬🇧 EN</option>
+      <option value="Hindi" ${state&&state.language==='Hindi'?'selected':''}>🇮🇳 HI</option>
+      <option value="Tamil" ${state&&state.language==='Tamil'?'selected':''}>Tamil</option>
+      <option value="Bengali" ${state&&state.language==='Bengali'?'selected':''}>বাংলা</option>
+      <option value="Telugu" ${state&&state.language==='Telugu'?'selected':''}>తెలుగు</option>
+      <option value="Marathi" ${state&&state.language==='Marathi'?'selected':''}>मराठी</option>
+    </select>
     <button id="profile-btn" onclick="openProfileModal()" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;padding:4px 10px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:5px;flex-shrink:0">
       <span id="profile-emoji">👤</span><span id="profile-name-nav" style="max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Me</span>
     </button>
@@ -312,6 +328,9 @@ img{display:block;max-width:100%;}
     </button>
     <button class="tabbar-btn" id="tb-calendar" onclick="switchTab('calendar')">
       <span class="tb-icon">📅</span>Calendar
+    </button>
+    <button class="tabbar-btn" id="tb-tools" onclick="switchTab('tools')">
+      <span class="tb-icon">🛠️</span>Tools
     </button>
     <button class="tabbar-btn" id="tb-share" onclick="switchTab('share')">
       <span class="tb-icon">🔗</span>Share
@@ -359,7 +378,10 @@ let state = {
   takenLog: {},     // {'YYYY-MM-DD': {medName: true/false}}
   profiles: [],     // [{id, name, emoji, result, reminders, msgs, stock, takenLog}]
   currentProfileId: null,
-  simpleMode: false, // Explain Like I'm 5
+  simpleMode: false,
+  language: localStorage.getItem('medbill_lang') || 'English',
+  voiceOn: false,
+  genericSavings: null,
 };
 
 /* ══════════════════════════════════════════
@@ -663,28 +685,80 @@ function parseTime(s) {
 }
 
 /* ══════════════════════════════════════════
-   REMINDER SCHEDULER
+   REMINDER SCHEDULER — FIXED v19
 ══════════════════════════════════════════ */
+let _firedKeys = {};
+
+function playAlertSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.28, 0.56].forEach(t => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.5, ctx.currentTime + t);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.35);
+      osc.start(ctx.currentTime + t);
+      osc.stop(ctx.currentTime + t + 0.35);
+    });
+  } catch(e) {}
+}
+
+function fireReminder(medName, dosage) {
+  const msg = 'Time to take ' + medName + (dosage ? ' — ' + dosage : '');
+  showAlert('💊 ' + msg, 10000);
+  playAlertSound();
+  if (state.notifPerm === 'granted') {
+    try {
+      new Notification('💊 Medicine Reminder', {
+        body: msg,
+        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>',
+        tag: medName,
+        requireInteraction: true
+      });
+    } catch(e) {}
+  }
+}
+
+function testReminder() {
+  fireReminder('Test Medicine', '1 tablet');
+}
+
 function scheduleReminders() {
   state.reminderTimers.forEach(clearInterval);
   state.reminderTimers = [];
-  if(!state.result?.medicines) return;
-  state.result.medicines.forEach(med => {
-    if(!state.reminders[med.name]) return;
-    (med.timing||[]).forEach(timeStr => {
-      const t = parseTime(timeStr);
-      if(!t) return;
-      const id = setInterval(()=>{
-        const now = new Date();
-        if(now.getHours()===t.h && now.getMinutes()===t.min) {
-          const msg = `Take ${med.name}${med.dosage?' ('+med.dosage+')':''}`;
-          if(state.notifPerm==='granted') new Notification('💊 Medicine Time', {body:msg, icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>'});
-          showAlert(msg);
+  _firedKeys = {};
+  if (!state.result?.medicines) return;
+
+  const checkId = setInterval(() => {
+    if (!state.result?.medicines) return;
+    const now = new Date();
+    const todayKey = now.toISOString().split('T')[0];
+    const hh = now.getHours();
+    const mm = now.getMinutes();
+
+    state.result.medicines.forEach(med => {
+      if (!state.reminders[med.name]) return;
+      (med.timing || []).forEach(timeStr => {
+        const t = parseTime(timeStr);
+        if (!t) return;
+        const diff = Math.abs((hh * 60 + mm) - (t.h * 60 + t.min));
+        if (diff <= 1) {
+          const fireKey = med.name + '@' + t.h + ':' + t.min + ':' + todayKey;
+          if (!_firedKeys[fireKey]) {
+            _firedKeys[fireKey] = true;
+            setTimeout(() => { delete _firedKeys[fireKey]; }, 180000);
+            fireReminder(med.name, med.dosage);
+          }
         }
-      }, 30000);
-      state.reminderTimers.push(id);
+      });
     });
-  });
+  }, 60000);
+
+  state.reminderTimers.push(checkId);
 }
 
 /* ══════════════════════════════════════════
@@ -911,7 +985,7 @@ async function sendChat(override) {
 ══════════════════════════════════════════ */
 function switchTab(tab) {
   state.activeTab = tab;
-  ['analyze','reminders','calendar','share','chat'].forEach(t=>{
+  ['analyze','reminders','calendar','tools','share','chat'].forEach(t=>{
     const btn = document.getElementById('tb-'+t);
     if(btn) btn.classList.toggle('active', t===tab);
   });
@@ -924,6 +998,7 @@ function renderContent() {
     case 'analyze': return renderAnalyzeTab();
     case 'reminders': return renderRemindersTab();
     case 'calendar': return renderCalendarTab();
+    case 'tools': return renderToolsTab();
     case 'share': return renderShareTab();
     case 'chat': return renderChatTab();
   }
@@ -1022,7 +1097,14 @@ function renderAnalyzeTab() {
 
   html += '<div class="disclaimer">⚕️ For informational purposes only. Always consult your doctor.</div>';
   html += '<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px;padding-bottom:8px">© 2025 MedBill AI · Built by <strong style="color:var(--accent)">Astastarial</strong> · All rights reserved<br>Unauthorized copying or redistribution is prohibited.</div>';
-  html += '<button class="btn-outline" style="width:100%;margin-top:16px" onclick="resetAll()">📂 Analyze Another Document</button>';
+  if(state.genericSavings) {
+    html += '<div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px;margin-top:10px">';
+    html += '<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px">💰 Generic Medicine Savings</div>';
+    html += '<div style="font-size:13px;color:var(--text);line-height:1.8">' + fmt(state.genericSavings) + '</div>';
+    html += '<button onclick="state.genericSavings=null;renderAnalyzeTab()" style="font-size:12px;color:var(--muted);margin-top:6px;background:none;border:none">✕ Close</button>';
+    html += '</div>';
+  }
+  html += '<button class="btn-outline" style="width:100%;margin-top:12px" onclick="resetAll()">📂 Analyze Another Document</button>';
   html += '</div>';
   c.innerHTML = html;
 }
@@ -1163,12 +1245,32 @@ function renderRemindersTab() {
   const c = document.getElementById('content');
   if(!state.result) { c.innerHTML='<div class="card fadeUp" style="margin-top:16px;text-align:center;color:var(--muted);padding:40px">Upload a bill first to set reminders</div>'; return; }
 
-  const notifBanner = state.notifPerm!=='granted' ? `
-    <div class="notif-banner">
-      <span class="nb-icon">🔔</span>
-      <div style="flex:1"><div class="nb-title">Allow Notifications</div><div class="nb-sub">Required for medicine reminders</div></div>
-      <button class="btn-primary" style="width:auto;padding:9px 14px;font-size:12px" onclick="reqNotif()">Allow</button>
-    </div>` : '';
+  const notifBanner = `
+    <div class="notif-banner" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="nb-icon">🔔</span>
+        <div style="flex:1">
+          <div class="nb-title">Notifications: <span style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">
+            ${state.notifPerm==='granted'?'✅ Allowed':'❌ '+state.notifPerm}</span>
+          </div>
+          <div class="nb-sub">Sound + popup alerts when it is medicine time</div>
+        </div>
+        ${state.notifPerm!=='granted' ? '<button class="btn-primary" style="width:auto;padding:9px 14px;font-size:12px;flex-shrink:0" onclick="reqNotif()">Allow</button>' : ''}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="testReminder()" style="flex:1;background:var(--adim);border:1px solid var(--aborder);border-radius:10px;padding:10px;font-size:13px;color:var(--accent);font-weight:600">
+          🔔 Test Alert Now
+        </button>
+        ${state.notifPerm==='denied' ? '<button onclick="showNotifHelp()" style="flex:1;background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.3);border-radius:10px;padding:10px;font-size:12px;color:var(--warn)">How to enable?</button>' : ''}
+      </div>
+      <div id="notif-help" style="display:none;background:var(--card2);border-radius:10px;padding:12px;font-size:12px;color:var(--muted);line-height:1.8">
+        <strong style="color:var(--text)">To enable notifications on Chrome Android:</strong><br>
+        1. Tap the 🔒 lock icon in address bar<br>
+        2. Tap "Site settings"<br>
+        3. Set Notifications → Allow<br>
+        4. Refresh the page
+      </div>
+    </div>`;
 
   let items = (state.result.medicines||[]).map((m, idx) => {
     const on = state.reminders[m.name];
@@ -1356,6 +1458,13 @@ function applyKey() {
   saveApiKey(k);
   showAlert('✅ API key saved! You can now analyze bills.');
   renderContent();
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  localStorage.setItem('medbill_theme', isLight ? 'light' : 'dark');
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = isLight ? '☀️' : '🌙';
 }
 
 function showProxySettings() {
@@ -1650,6 +1759,220 @@ function closeProfileModal() {
   document.getElementById('profile-modal').style.display = 'none';
 }
 
+
+/* ══════════════════════════════════════════
+   LANGUAGE + VOICE
+══════════════════════════════════════════ */
+function setLanguage(lang) {
+  state.language = lang;
+  localStorage.setItem('medbill_lang', lang);
+  showAlert('🌐 Language set to ' + lang);
+}
+
+function speakAnalysis() {
+  if (!state.result) return;
+  if (!window.speechSynthesis) { showAlert('Voice not supported in this browser. Try Chrome.'); return; }
+  window.speechSynthesis.cancel();
+  const r = state.result;
+  const lang = state.language;
+  const langCode = {
+    'Hindi': 'hi-IN', 'Tamil': 'ta-IN', 'Bengali': 'bn-IN',
+    'Telugu': 'te-IN', 'Marathi': 'mr-IN', 'English': 'en-IN'
+  }[lang] || 'en-IN';
+
+  // Build speech text from result
+  let text = '';
+  if (lang === 'Hindi') {
+    text = 'मेडबिल AI विश्लेषण। ';
+    if (r.patient_name) text += 'मरीज का नाम: ' + r.patient_name + '. ';
+    if (r.diagnosis) text += 'बीमारी: ' + r.diagnosis + '. ';
+    if (r.medicines?.length) {
+      text += 'दवाइयां: ';
+      r.medicines.forEach(m => { text += m.name + ', ' + (m.dosage||'') + ', ' + (m.frequency||'') + '. '; });
+    }
+    if (r.general_instructions) text += 'निर्देश: ' + r.general_instructions;
+  } else {
+    text = 'MedBill AI Analysis. ';
+    if (r.patient_name) text += 'Patient: ' + r.patient_name + '. ';
+    if (r.diagnosis) text += 'Diagnosis: ' + r.diagnosis + '. ';
+    if (r.medicines?.length) {
+      text += 'Medicines: ';
+      r.medicines.forEach(m => { text += m.name + ', ' + (m.dosage||'') + ', take ' + (m.frequency||'') + '. '; });
+    }
+    if (r.general_instructions) text += 'Instructions: ' + r.general_instructions;
+  }
+
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = langCode;
+  utter.rate = 0.85;
+  utter.pitch = 1;
+  // Try to find a matching voice
+  const voices = window.speechSynthesis.getVoices();
+  const match = voices.find(v => v.lang.startsWith(langCode.split('-')[0]));
+  if (match) utter.voice = match;
+  utter.onstart = () => showAlert('🔊 Reading aloud in ' + lang + '... Tap again to stop.', 3000);
+  utter.onerror = (e) => showAlert('Voice error: ' + e.error + '. Try Chrome browser.');
+  window.speechSynthesis.speak(utter);
+}
+
+function stopVoice() {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+/* ══════════════════════════════════════════
+   GENERIC MEDICINE FINDER
+══════════════════════════════════════════ */
+async function findGenerics() {
+  if (!state.result?.medicines?.length) { showAlert('No medicines found to check.'); return; }
+  showAlert('💰 Finding generic alternatives and savings…');
+  const meds = state.result.medicines.map(m => m.name + (m.dosage ? ' ' + m.dosage : '')).join(', ');
+  const prompt = 'For each of these branded medicines, provide the generic (salt) name and approximate Indian market price comparison. Medicines: ' + meds + '. Format as a simple list: Medicine Name → Generic Name → Branded Price → Generic Price → Savings. If government Jan Aushadhi scheme covers it, mention that. Keep it concise and practical for Indian patients.';
+  try {
+    const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 800, temperature: 0.2 });
+    const data = await groqRequest(body, state.apiKey);
+    if (data.error) throw new Error(data.error.message);
+    state.genericSavings = data.choices?.[0]?.message?.content || 'No data found.';
+    renderAnalyzeTab();
+  } catch(e) { showAlert('Error: ' + e.message); }
+}
+
+/* ══════════════════════════════════════════
+   REGIONAL LANGUAGE EXPLANATION
+══════════════════════════════════════════ */
+async function explainSimple() {
+  if (!state.result) return;
+  const lang = state.language;
+  showAlert('🧒 Generating simple explanation in ' + lang + '…');
+  const meds = (state.result.medicines||[]).map(m => m.name + ' ' + (m.dosage||'') + ' ' + (m.frequency||'')).join(', ');
+  const diag = state.result.diagnosis || '';
+  const langInstruction = lang === 'English' ? 'in very simple English' :
+    lang === 'Hindi' ? 'in simple Hindi (Hinglish is fine)' :
+    'in simple ' + lang + ' language';
+
+  const prompt = 'Explain this prescription ' + langInstruction + ' to someone with no medical knowledge. Use simple words and emojis. Avoid all medical jargon. Diagnosis: ' + diag + '. Medicines: ' + meds + '. Explain what each medicine does in 1 simple sentence, when to take it, and any important warnings.';
+  try {
+    const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 900, temperature: 0.5 });
+    const data = await groqRequest(body, state.apiKey);
+    if (data.error) throw new Error(data.error.message);
+    state.simpleExplanation = data.choices?.[0]?.message?.content;
+    state.simpleMode = true;
+    renderAnalyzeTab();
+    // Auto-speak if voice enabled
+    if (state.voiceOn) setTimeout(() => speakText(state.simpleExplanation), 500);
+  } catch(e) { showAlert('Error: ' + e.message); }
+}
+
+function speakText(text) {
+  if (!window.speechSynthesis || !text) return;
+  window.speechSynthesis.cancel();
+  const lang = state.language;
+  const langCode = { 'Hindi':'hi-IN','Tamil':'ta-IN','Bengali':'bn-IN','Telugu':'te-IN','Marathi':'mr-IN','English':'en-IN' }[lang] || 'en-IN';
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = langCode;
+  utter.rate = 0.85;
+  window.speechSynthesis.speak(utter);
+}
+
+
+
+
+/* ══════════════════════════════════════════
+   TOOLS TAB
+══════════════════════════════════════════ */
+function renderToolsTab() {
+  const c = document.getElementById('content');
+
+  c.innerHTML = '<div class="fadeUp">' +
+
+  // ── VOICE + LANGUAGE
+  '<div class="sec-label">🔊 Voice & Language</div>' +
+  '<div class="card" style="margin-bottom:12px">' +
+    '<div style="font-size:13px;color:var(--muted);margin-bottom:12px">Read prescriptions aloud in your language. Great for elderly patients who cannot read English.</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+      ['English','Hindi','Tamil','Bengali','Telugu','Marathi'].map(l =>
+        '<button onclick="setLanguage(\'' + l + '\');renderToolsTab()" style="padding:7px 14px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid ' + (state.language===l?'var(--accent)':'var(--border)') + ';background:' + (state.language===l?'var(--adim)':'transparent') + ';color:' + (state.language===l?'var(--accent)':'var(--muted)') + '">' + l + '</button>'
+      ).join('') +
+    '</div>' +
+    '<div style="display:flex;gap:8px">' +
+      '<button onclick="speakAnalysis()" class="btn-primary" style="flex:1;font-size:13px">🔊 Read Prescription Aloud</button>' +
+      '<button onclick="stopVoice()" style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--muted)">⏹ Stop</button>' +
+    '</div>' +
+  '</div>' +
+
+  // ── GENERIC MEDICINE SAVINGS
+  '<div class="sec-label">💰 Generic Medicine Savings</div>' +
+  '<div class="card" style="margin-bottom:12px">' +
+    '<div style="font-size:13px;color:var(--muted);margin-bottom:4px">Find cheaper generic alternatives based on medicine names. Estimates only — verify prices at your pharmacy.</div>' +
+    '<div style="font-size:11px;color:var(--warn);margin-bottom:12px">⚠️ AI estimates — not live pharmacy prices</div>' +
+    '<button onclick="findGenerics()" class="btn-primary" style="width:100%;margin-bottom:' + (state.genericSavings?'12px':'0') + '">' +
+      '💊 Find Generic Alternatives' +
+    '</button>' +
+    (state.genericSavings ?
+      '<div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:14px;font-size:13px;color:var(--text);line-height:1.8">' +
+        fmt(state.genericSavings) +
+        '<button onclick="state.genericSavings=null;renderToolsTab()" style="display:block;font-size:12px;color:var(--muted);margin-top:8px;background:none;border:none">✕ Clear</button>' +
+      '</div>'
+    : '') +
+  '</div>' +
+
+  // ── WHATSAPP CAREGIVER SHARE
+  '<div class="sec-label">📲 Caregiver Sharing</div>' +
+  '<div class="card" style="margin-bottom:12px">' +
+    '<div style="font-size:13px;color:var(--muted);margin-bottom:12px">Share a complete medicine summary on WhatsApp with family or caregivers. They need no app — just a message.</div>' +
+    '<div style="display:flex;gap:8px">' +
+      '<button onclick="shareOnWhatsApp()" class="btn-primary" style="flex:1;background:rgba(37,211,102,0.15);border:1px solid rgba(37,211,102,0.3);color:#25D366;font-size:13px">📲 Share on WhatsApp</button>' +
+      '<button onclick="copyMedicineSummary()" style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--muted)">📋 Copy</button>' +
+    '</div>' +
+  '</div>' +
+
+  '</div>';
+}
+
+/* ══════════════════════════════════════════
+   WHATSAPP + CAREGIVER SHARING
+══════════════════════════════════════════ */
+function buildMedicineSummary() {
+  if (!state.result) return 'No analysis available.';
+  const r = state.result;
+  const NL = '\n';
+  let text = '💊 *MedBill AI — Medicine Summary*' + NL + NL;
+  if (r.patient_name) text += '👤 Patient: ' + r.patient_name + NL;
+  if (r.diagnosis) text += '🏥 Diagnosis: ' + r.diagnosis + NL;
+  if (r.doctor_name) text += '👨‍⚕️ Doctor: ' + r.doctor_name + NL;
+  if (r.date) text += '📅 Date: ' + r.date + NL;
+  text += NL + '*Medicines:*' + NL;
+  (r.medicines||[]).forEach((m, i) => {
+    text += (i+1) + '. ' + m.name;
+    if (m.dosage) text += ' - ' + m.dosage;
+    if (m.frequency) text += ' - ' + m.frequency;
+    if (m.timing && m.timing.length) text += ' (' + m.timing.join(', ') + ')';
+    if (m.instructions) text += NL + '   Instructions: ' + m.instructions;
+    text += NL;
+  });
+  if (r.general_instructions) text += NL + 'Instructions: ' + r.general_instructions + NL;
+  if (r.follow_up) text += NL + 'Follow-up: ' + r.follow_up + NL;
+  text += NL + 'Shared via MedBill AI - astastarial168-alt.github.io/medbill';
+  return text;
+}
+
+function shareOnWhatsApp() {
+  if (!state.result) { showAlert('Analyze a document first.'); return; }
+  const text = buildMedicineSummary();
+  const url = 'https://wa.me/?text=' + encodeURIComponent(text);
+  window.open(url, '_blank');
+}
+
+function copyMedicineSummary() {
+  if (!state.result) { showAlert('Analyze a document first.'); return; }
+  const text = buildMedicineSummary();
+  navigator.clipboard.writeText(text).then(() => showAlert('📋 Summary copied! Paste in any app.')).catch(() => showAlert('Copy failed — try WhatsApp share instead.'));
+}
+
+/* ══════════════════════════════════════════
+   COUNTERFEIT FILE HANDLER
+══════════════════════════════════════════ */
+
+
 function resetAll() {
   state.file=null; state.result=null; state.msgs=[]; state.shareCode=null; state.reminders={};
   state.reminderTimers.forEach(clearInterval); state.reminderTimers=[];
@@ -1736,21 +2059,28 @@ function toggleReminder(name) {
   if (state.reminders[name]) showAlert('✅ Reminder set for ' + name);
 }
 
+function showNotifHelp() {
+  const el = document.getElementById('notif-help');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
 function reqNotif() {
   if (!('Notification' in window)) {
     showAlert('Your browser does not support notifications. Try Chrome on Android.');
     return;
   }
+  if (Notification.permission === 'denied') {
+    showAlert('❌ Notifications blocked by browser. Tap "How to enable?" for steps.');
+    renderRemindersTab();
+    return;
+  }
   Notification.requestPermission().then(p => {
     state.notifPerm = p;
     if (p === 'granted') {
-      showAlert('✅ Notifications enabled! Reminders will work now.');
-      // Send a test notification immediately
-      setTimeout(() => {
-        new Notification('💊 MedBill AI', { body: 'Notifications are working! You will be reminded when it is time to take your medicines.', icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>' });
-      }, 500);
+      showAlert('✅ Notifications enabled!');
+      fireReminder('MedBill AI Test', 'Reminders are now working!');
     } else if (p === 'denied') {
-      showAlert('❌ Notifications blocked. Go to browser Settings → Site Settings → Notifications → Allow for this site.');
+      showAlert('❌ Blocked. Tap "How to enable?" button for steps.');
     }
     renderRemindersTab();
   });
@@ -1825,6 +2155,16 @@ function openProfileModal() {
   document.getElementById('profile-modal').style.display = 'flex';
 }
 
+/* ── Apply saved theme ── */
+(function() {
+  const saved = localStorage.getItem('medbill_theme');
+  if (saved === 'light') {
+    document.body.classList.add('light');
+    const btn = document.getElementById('theme-btn');
+    if (btn) btn.textContent = '☀️';
+  }
+})();
+
 /* ── Initial render — load profiles and saved data ── */
 loadProfiles();
 scheduleReminders();
@@ -1832,7 +2172,9 @@ renderContent();
 
 /* ── Auto-request notification permission after 3s ── */
 if ('Notification' in window && Notification.permission === 'default') {
-  setTimeout(() => { Notification.requestPermission().then(p => { state.notifPerm = p; }); }, 3000);
+  setTimeout(() => {
+    Notification.requestPermission().then(p => { state.notifPerm = p; });
+  }, 3000);
 }
 </script>
 <!-- About / Ownership Modal -->
@@ -1842,7 +2184,7 @@ if ('Notification' in window && Notification.permission === 'default') {
     <div style="text-align:center;margin-bottom:20px">
       <div style="font-size:40px;margin-bottom:8px">💊</div>
       <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 18 · 2025</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 21 · 2025</div>
     </div>
     <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
