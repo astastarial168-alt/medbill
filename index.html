@@ -79,6 +79,32 @@ img{display:block;max-width:100%;}
 
 /* Scrollbar */
 ::-webkit-scrollbar{width:3px;}
+
+/* ── Onboarding / Consent overlay ── */
+#consent-overlay{position:fixed;inset:0;background:#070D1A;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;overflow-y:auto;}
+body.light #consent-overlay{background:#F0F4F8;}
+.onboard-step{display:none;flex-direction:column;align-items:center;text-align:center;max-width:360px;width:100%;animation:fadeUp 0.4s ease;}
+.onboard-step.active{display:flex;}
+.onboard-icon{font-size:64px;margin-bottom:20px;}
+.onboard-title{font-size:24px;font-weight:900;color:var(--text);margin-bottom:10px;line-height:1.2;}
+.onboard-body{font-size:14px;color:var(--muted);line-height:1.7;margin-bottom:24px;}
+.onboard-dots{display:flex;gap:8px;margin-bottom:24px;}
+.onboard-dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:background 0.3s;}
+.onboard-dot.active{background:var(--accent);width:22px;border-radius:99px;}
+.onboard-btn{width:100%;max-width:320px;}
+.onboard-skip{font-size:12px;color:var(--muted);margin-top:16px;background:none;border:none;cursor:pointer;text-decoration:underline;}
+
+/* ── Confidence badge ── */
+.confidence-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700;}
+.confidence-high{background:rgba(0,212,170,0.12);color:var(--accent);border:1px solid var(--aborder);}
+.confidence-medium{background:rgba(255,209,102,0.12);color:var(--gold);border:1px solid rgba(255,209,102,0.3);}
+.confidence-low{background:rgba(255,107,107,0.12);color:var(--warn);border:1px solid rgba(255,107,107,0.3);}
+
+/* ── Error human-readable ── */
+.err-human{background:rgba(255,107,107,0.06);border:1px solid rgba(255,107,107,0.25);border-radius:16px;padding:20px;text-align:center;margin-top:12px;}
+.err-human-icon{font-size:36px;margin-bottom:10px;}
+.err-human-title{font-size:15px;font-weight:800;color:var(--warn);margin-bottom:6px;}
+.err-human-body{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:14px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
 
@@ -111,6 +137,7 @@ img{display:block;max-width:100%;}
 }
 .nav-logo{font-size:22px;}
 .nav-title{font-size:16px;font-weight:800;flex:1;}
+body.light .nav-title span:last-child{color:var(--muted) !important;}
 .nav-badge{background:var(--adim);border:1px solid var(--aborder);color:var(--accent);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;letter-spacing:.08em;}
 
 /* ── Bottom Tab Bar ── */
@@ -240,7 +267,16 @@ img{display:block;max-width:100%;}
 
 /* ── Floating alerts ── */
 #alerts{position:fixed;top:calc(70px + env(safe-area-inset-top,0px));right:12px;left:12px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
-.alert-item{background:var(--accent);color:#fff;border-radius:14px;padding:14px 16px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:10px;box-shadow:0 8px 28px rgba(0,0,0,.5);pointer-events:auto;}
+.alert-item{background:var(--accent);color:#fff;border-radius:14px;padding:12px 16px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:10px;box-shadow:0 8px 28px rgba(0,0,0,.5);pointer-events:auto;}
+.alert-medicine{background:linear-gradient(135deg,#1a1a2e,#16213e);border:2px solid var(--accent);color:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 32px rgba(0,212,170,0.4);flex-direction:column;align-items:stretch;gap:12px;}
+.alert-medicine .am-top{display:flex;align-items:center;gap:12px;}
+.alert-medicine .am-icon{font-size:32px;animation:pulse-icon 1s infinite;}
+.alert-medicine .am-name{font-size:17px;font-weight:800;flex:1;}
+.alert-medicine .am-dose{font-size:12px;color:var(--accent);font-weight:600;}
+.alert-medicine .am-timer{font-size:13px;color:rgba(255,255,255,0.6);text-align:center;}
+.alert-medicine .am-btn{width:100%;padding:12px;border-radius:12px;font-size:15px;font-weight:800;background:var(--accent);color:#000;border:none;cursor:pointer;}
+.alert-medicine .am-dismiss{width:100%;padding:8px;border-radius:10px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.2);cursor:pointer;margin-top:4px;}
+@keyframes pulse-icon{0%,100%{transform:scale(1);}50%{transform:scale(1.2);}}
 
 /* ── Install banner ── */
 #install-banner{display:none;position:fixed;bottom:calc(60px + env(safe-area-inset-bottom,0px));left:12px;right:12px;z-index:99;background:linear-gradient(135deg,#00D4AA,#0097A7);border-radius:18px;padding:16px 18px;color:#fff;box-shadow:0 8px 30px rgba(0,0,0,.5);}
@@ -275,22 +311,17 @@ img{display:block;max-width:100%;}
 .or-divider::after{right:0;}
 .code-row{display:flex;gap:8px;}
 </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 <div id="app">
   <!-- Top Nav -->
   <nav class="topnav safe-top">
     <span class="nav-logo">💊</span>
-    <span class="nav-title">MedBill AI <span style="font-size:10px;opacity:0.4">v21 · © Astastarial</span></span>
+    <span class="nav-title" style="background:linear-gradient(90deg,#00D4AA,#0097CC);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">MedBill AI <span style="font-size:10px;opacity:0.7;-webkit-text-fill-color:var(--muted);background:none">v28 · © Astastarial</span></span>
+    <button onclick="showOnboarding()" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;width:34px;height:34px;font-size:14px;font-weight:800;color:var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0" title="Help">?</button>
     <button id="theme-btn" onclick="toggleTheme()" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;width:34px;height:34px;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0" title="Toggle theme">🌙</button>
-    <select id="lang-select" onchange="setLanguage(this.value)" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;padding:4px 8px;font-size:11px;color:var(--accent);max-width:72px">
-      <option value="English" ${state&&state.language==='English'?'selected':''}>🇬🇧 EN</option>
-      <option value="Hindi" ${state&&state.language==='Hindi'?'selected':''}>🇮🇳 HI</option>
-      <option value="Tamil" ${state&&state.language==='Tamil'?'selected':''}>Tamil</option>
-      <option value="Bengali" ${state&&state.language==='Bengali'?'selected':''}>বাংলা</option>
-      <option value="Telugu" ${state&&state.language==='Telugu'?'selected':''}>తెలుగు</option>
-      <option value="Marathi" ${state&&state.language==='Marathi'?'selected':''}>मराठी</option>
-    </select>
+
     <button id="profile-btn" onclick="openProfileModal()" style="background:var(--adim);border:1px solid var(--aborder);border-radius:99px;padding:4px 10px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:5px;flex-shrink:0">
       <span id="profile-emoji">👤</span><span id="profile-name-nav" style="max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Me</span>
     </button>
@@ -309,6 +340,97 @@ img{display:block;max-width:100%;}
     <div class="ib-btns">
       <button class="ib-install" id="btn-install">Install App</button>
       <button class="ib-dismiss" id="btn-dismiss">Later</button>
+    </div>
+  </div>
+
+  <!-- Onboarding / Consent Overlay -->
+  <div id="consent-overlay" style="display:none">
+    <div style="max-width:360px;width:100%">
+      <!-- Dots -->
+      <div class="onboard-dots" id="onboard-dots">
+        <div class="onboard-dot active" id="dot-0"></div>
+        <div class="onboard-dot" id="dot-1"></div>
+        <div class="onboard-dot" id="dot-2"></div>
+        <div class="onboard-dot" id="dot-3"></div>
+      </div>
+
+      <!-- Step 0: Welcome -->
+      <div class="onboard-step active" id="step-0">
+        <div class="onboard-icon">💊</div>
+        <div class="onboard-title">Welcome to MedBill AI</div>
+        <div class="onboard-body">Your personal AI health assistant. Upload any prescription, lab report or medical bill — and understand it instantly in your language.</div>
+        <button class="btn-primary onboard-btn" onclick="nextStep(1)">Get Started →</button>
+      </div>
+
+      <!-- Step 1: How it works -->
+      <div class="onboard-step" id="step-1">
+        <div class="onboard-icon">📄</div>
+        <div class="onboard-title">Upload Any Document</div>
+        <div class="onboard-body">
+          Take a photo or upload a file of your:<br><br>
+          💊 <strong>Prescription</strong> — see medicines, timings, purpose<br>
+          🧪 <strong>Lab Report</strong> — understand your results<br>
+          🏥 <strong>Discharge Summary</strong> — know your follow-ups<br>
+          🧾 <strong>Medical Bill</strong> — review what you paid for
+        </div>
+        <button class="btn-primary onboard-btn" onclick="nextStep(2)">Next →</button>
+        <button class="onboard-skip" onclick="nextStep(0)">← Back</button>
+      </div>
+
+      <!-- Step 2: Reminders -->
+      <div class="onboard-step" id="step-2">
+        <div class="onboard-icon">⏰</div>
+        <div class="onboard-title">Smart Reminders</div>
+        <div class="onboard-body">
+          Set medicine reminders that alert you with <strong>sound + popup</strong> when it's time to take your dose.<br><br>
+          <strong style="color:var(--gold)">⚠️ Important:</strong> Reminders only work while this tab is open. For best results, add the app to your <strong>Home Screen</strong> and keep it running.
+        </div>
+        <button class="btn-primary onboard-btn" onclick="nextStep(3)">Next →</button>
+        <button class="onboard-skip" onclick="nextStep(1)">← Back</button>
+      </div>
+
+      <!-- Step 3: Legal Consent — must agree -->
+      <div class="onboard-step" id="step-3">
+        <div class="onboard-icon">⚕️</div>
+        <div class="onboard-title">Please Read & Agree</div>
+        <div class="onboard-body" style="text-align:left;font-size:12px;max-height:44vh;overflow-y:auto;line-height:1.8">
+          <div style="background:rgba(255,107,107,0.08);border:1px solid rgba(255,107,107,0.2);border-radius:12px;padding:14px;margin-bottom:12px">
+            <div style="font-weight:800;color:var(--warn);margin-bottom:8px;font-size:13px">⚕️ Medical Disclaimer</div>
+            MedBill AI is an <strong>informational tool only</strong>. It is <strong>NOT a medical device</strong>, NOT a licensed medical service, and NOT a substitute for professional medical advice, diagnosis, or treatment.<br><br>
+            • AI may misread blurry, incomplete, or unclear documents<br>
+            • Medicine names, dosages, or timings may occasionally be inaccurate<br>
+            • <strong>Always verify all information with your doctor or pharmacist</strong><br>
+            • <strong>Never change, skip, or stop medicines based on this app alone</strong><br>
+            • Do not use this app in medical emergencies — call emergency services
+          </div>
+          <div style="background:rgba(0,212,170,0.06);border:1px solid var(--aborder);border-radius:12px;padding:14px;margin-bottom:12px">
+            <div style="font-weight:800;color:var(--accent);margin-bottom:8px;font-size:13px">🔒 Privacy & Data</div>
+            • Your documents are sent to an AI model (Groq/Meta Llama) for analysis<br>
+            • <strong>No documents or personal data are stored on any server</strong><br>
+            • All data is saved only on your own device (localStorage)<br>
+            • We do not sell, share, or monetise your data in any way<br>
+            • By using this app you consent to your document images being processed by the AI model for analysis
+          </div>
+          <div style="background:rgba(255,209,102,0.06);border:1px solid rgba(255,209,102,0.2);border-radius:12px;padding:14px;margin-bottom:12px">
+            <div style="font-weight:800;color:var(--gold);margin-bottom:8px;font-size:13px">📋 Terms of Use</div>
+            • This app is provided free of charge "as is" with no warranties<br>
+            • The creator (Astastarial) is not liable for any health decisions made based on this app<br>
+            • You must be 18 years or older to use this app, or have parental consent<br>
+            • Do not upload documents belonging to others without their permission<br>
+            • This app is for personal, non-commercial use only<br>
+            • © 2025 Astastarial. All rights reserved. Copying or redistribution prohibited.
+          </div>
+          <div style="font-size:11px;color:var(--muted);text-align:center">
+            By tapping "I Agree", you confirm you have read and understood these terms.
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:14px;margin-bottom:4px;background:var(--card2);border-radius:12px;padding:12px">
+          <input type="checkbox" id="consent-check" style="width:20px;height:20px;accent-color:var(--accent);flex-shrink:0">
+          <label for="consent-check" style="font-size:12px;color:var(--text);cursor:pointer;line-height:1.5">I have read and agree to the Medical Disclaimer, Privacy Policy, and Terms of Use</label>
+        </div>
+        <button class="btn-primary onboard-btn" onclick="agreeAndStart()" id="agree-btn" style="opacity:0.4;pointer-events:none">✅ I Agree — Let's Start</button>
+        <button class="onboard-skip" onclick="nextStep(2)">← Back</button>
+      </div>
     </div>
   </div>
 
@@ -379,6 +501,7 @@ let state = {
   profiles: [],     // [{id, name, emoji, result, reminders, msgs, stock, takenLog}]
   currentProfileId: null,
   simpleMode: false,
+  savedAnalyses: JSON.parse(localStorage.getItem('medbill_saved_analyses')||'[]'),
   language: localStorage.getItem('medbill_lang') || 'English',
   voiceOn: false,
   genericSavings: null,
@@ -689,37 +812,149 @@ function parseTime(s) {
 ══════════════════════════════════════════ */
 let _firedKeys = {};
 
-function playAlertSound() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.28, 0.56].forEach(t => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(0.5, ctx.currentTime + t);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.35);
-      osc.start(ctx.currentTime + t);
-      osc.stop(ctx.currentTime + t + 0.35);
-    });
-  } catch(e) {}
+let _alertAudioCtx = null;
+let _alertSoundInterval = null;
+
+function playAlertSound(loop = false) {
+  stopAlertSound();
+  function beep() {
+    try {
+      _alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = _alertAudioCtx;
+      [0, 0.3, 0.6].forEach(t => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = 880; osc.type = 'sine';
+        gain.gain.setValueAtTime(0.6, ctx.currentTime + t);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.4);
+        osc.start(ctx.currentTime + t);
+        osc.stop(ctx.currentTime + t + 0.4);
+      });
+    } catch(e) {}
+  }
+  beep();
+  if (loop) {
+    _alertSoundInterval = setInterval(beep, 4000); // Repeat every 4 seconds
+    // Auto-stop after 60 seconds
+    setTimeout(stopAlertSound, 60000);
+  }
+}
+
+function stopAlertSound() {
+  if (_alertSoundInterval) { clearInterval(_alertSoundInterval); _alertSoundInterval = null; }
+  try { if (_alertAudioCtx) { _alertAudioCtx.close(); _alertAudioCtx = null; } } catch(e) {}
 }
 
 function fireReminder(medName, dosage) {
-  const msg = 'Time to take ' + medName + (dosage ? ' — ' + dosage : '');
-  showAlert('💊 ' + msg, 10000);
-  playAlertSound();
+  // Play looping sound for 60 seconds
+  playAlertSound(true);
+
+  // Show big medicine alert card
+  showMedicineAlert(medName, dosage);
+
+  // Device notification bar — stays until dismissed
   if (state.notifPerm === 'granted') {
     try {
-      new Notification('💊 Medicine Reminder', {
-        body: msg,
+      const n = new Notification('💊 Medicine Time!', {
+        body: 'Take ' + medName + (dosage ? ' — ' + dosage : '') + '\nTap to open MedBill AI',
         icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>',
-        tag: medName,
-        requireInteraction: true
+        badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>',
+        tag: 'med-' + medName,
+        requireInteraction: true,  // Stays in notification bar until user acts
+        silent: false,
+        vibrate: [300, 100, 300, 100, 300]
       });
+      // Auto-close notification after 60 seconds if not acted on
+      setTimeout(() => { try { n.close(); } catch(e) {} }, 60000);
     } catch(e) {}
+  }
+}
+
+// Active medicine alert elements (so we can remove them)
+let _activeAlerts = {};
+
+function showMedicineAlert(medName, dosage) {
+  // Remove any existing alert for same medicine
+  dismissMedicineAlert(medName);
+
+  const alertsEl = document.getElementById('alerts');
+  const div = document.createElement('div');
+  div.className = 'alert-item alert-medicine slideIn';
+  div.id = 'med-alert-' + medName.replace(/\s/g, '_');
+
+  let seconds = 60;
+  div.innerHTML = buildAlertHTML(medName, dosage, seconds);
+
+  alertsEl.appendChild(div);
+  _activeAlerts[medName] = div;
+
+  // Countdown timer on alert
+  const countdownId = setInterval(() => {
+    seconds--;
+    const timerEl = div.querySelector('.am-timer');
+    if (timerEl) timerEl.textContent = 'Auto-dismisses in ' + seconds + 's';
+    if (seconds <= 0) {
+      clearInterval(countdownId);
+      dismissMedicineAlert(medName);
+    }
+  }, 1000);
+
+  div._countdownId = countdownId;
+}
+
+function buildAlertHTML(medName, dosage, seconds) {
+  return '<div class="am-top">' +
+    '<span class="am-icon">💊</span>' +
+    '<div><div class="am-name">' + esc(medName) + '</div>' +
+    (dosage ? '<div class="am-dose">' + esc(dosage) + '</div>' : '') + '</div>' +
+  '</div>' +
+  '<div class="am-timer">Auto-dismisses in ' + seconds + 's</div>' +
+  '<button class="am-btn" onclick="markTakenFromAlert(\'' + esc(medName) + '\')">✅ Mark as Taken</button>' +
+  '<button class="am-dismiss" onclick="dismissMedicineAlert(\'' + esc(medName) + '\')">✕ Dismiss (not taken yet)</button>';
+}
+
+function markTakenFromAlert(medName) {
+  stopAlertSound();
+  const today = new Date().toISOString().split('T')[0];
+  if (!state.takenLog[today]) state.takenLog[today] = {};
+  // Only deduct once per day
+  if (!state.takenLog[today][medName]) {
+    state.takenLog[today][medName] = true;
+    if (state.stock[medName]?.remaining > 0) {
+      state.stock[medName].remaining--;
+      // Refill warning
+      if (state.stock[medName].remaining <= 5) {
+        setTimeout(() => showAlert('💊 Only ' + state.stock[medName].remaining + ' tablets of ' + medName + ' left — time to refill!', 8000), 1500);
+      } else if (state.stock[medName].remaining === 0) {
+        setTimeout(() => showAlert('🚨 ' + medName + ' is out of stock! Refill immediately.', 8000), 1500);
+      }
+    }
+  } else {
+    state.takenLog[today][medName] = true;
+  }
+  saveData();
+  dismissMedicineAlert(medName);
+  // Show small confirmation
+  const div = document.createElement('div');
+  div.className = 'alert-item slideIn';
+  div.style.background = '#1a8a5a';
+  div.innerHTML = '<span style="font-size:20px">✅</span> ' + esc(medName) + ' marked as taken!';
+  document.getElementById('alerts').appendChild(div);
+  setTimeout(() => div.remove(), 4000);
+  // If on calendar tab, refresh
+  if (state.activeTab === 'calendar') renderCalendarTab();
+  if (state.activeTab === 'reminders') renderRemindersTab();
+}
+
+function dismissMedicineAlert(medName) {
+  stopAlertSound();
+  const el = _activeAlerts[medName] || document.getElementById('med-alert-' + (medName||'').replace(/\s/g,'_'));
+  if (el) {
+    if (el._countdownId) clearInterval(el._countdownId);
+    el.style.animation = 'slideOut 0.3s ease forwards';
+    setTimeout(() => { try { el.remove(); } catch(e) {} }, 300);
+    delete _activeAlerts[medName];
   }
 }
 
@@ -865,7 +1100,9 @@ Determine the document type and extract ALL information. Return ONLY a single va
   "general_instructions": null,
   "follow_up": null,
   "total_amount": null,
-  "summary": "One sentence plain-English summary of the document"
+  "summary": "One sentence plain-English summary of the document",
+  "confidence": "high|medium|low",
+  "confidence_reason": "Brief reason if not high — e.g. blurry image, partial document"
 }
 
 Rules:
@@ -1013,9 +1250,39 @@ function renderLoading() {
     </div>`;
 }
 
-function showError(ctx, msg) {
-  const el = document.getElementById('err-'+ctx);
-  if(el) { el.style.display=''; el.textContent='⚠️ '+msg; }
+function humanizeError(raw) {
+  if (!raw) return { title: 'Something went wrong', body: 'Please try again with a clearer photo.' };
+  const r = raw.toLowerCase();
+  if (r.includes('429') || r.includes('rate limit') || r.includes('too many'))
+    return { title: 'AI is busy right now', body: 'Wait 30 seconds and try again. This happens when many people use the app at once.' };
+  if (r.includes('network') || r.includes('fetch') || r.includes('failed to fetch') || r.includes('offline'))
+    return { title: 'No internet connection', body: 'Check your Wi-Fi or mobile data and try again.' };
+  if (r.includes('timeout') || r.includes('timed out'))
+    return { title: 'Took too long', body: 'The server timed out. Try with a smaller or clearer image.' };
+  if (r.includes('pdf') || r.includes('convert'))
+    return { title: 'Could not read this PDF', body: 'Take a screenshot of the PDF and upload the screenshot image instead — that works perfectly.' };
+  if (r.includes('not a medical') || r.includes('no medical'))
+    return { title: 'Not a medical document', body: 'We could not find medical information in this photo. Please upload a prescription, lab report, or medical bill.' };
+  if (r.includes('blurry') || r.includes('unclear') || r.includes('cannot read'))
+    return { title: 'Image is too unclear', body: 'The photo is blurry or too dark. Take a photo in good lighting, close up, and try again.' };
+  if (r.includes('413') || r.includes('too large'))
+    return { title: 'File is too large', body: 'The image is too large. Try taking a fresh photo instead of uploading a high-resolution scan.' };
+  if (r.includes('500') || r.includes('server error'))
+    return { title: 'Server error', body: 'The AI server had a temporary problem. Please try again in a minute.' };
+  return { title: 'Could not analyze', body: raw.length > 150 ? 'An error occurred. Please try again with a clearer image.' : raw };
+}
+
+function showError(ctx, rawMsg) {
+  const id = 'err-' + ctx;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const { title, body } = humanizeError(rawMsg);
+  el.style.display = '';
+  el.className = 'err-human';
+  el.innerHTML = '<div class="err-human-icon">😕</div>'
+    + '<div class="err-human-title">' + esc(title) + '</div>'
+    + '<div class="err-human-body">' + esc(body) + '</div>'
+    + '<button class="btn-primary" style="width:auto;padding:10px 24px;font-size:13px" onclick="this.closest(\'.err-human\').style.display=\'none\'">Try Again</button>';
 }
 
 function renderAnalyzeTab() {
@@ -1095,8 +1362,14 @@ function renderAnalyzeTab() {
       + '<div class="card" style="font-size:14px;color:var(--sub);line-height:1.7">' + esc(r.follow_up) + '</div>';
   }
 
-  html += '<div class="disclaimer">⚕️ For informational purposes only. Always consult your doctor.</div>';
-  html += '<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px;padding-bottom:8px">© 2025 MedBill AI · Built by <strong style="color:var(--accent)">Astastarial</strong> · All rights reserved<br>Unauthorized copying or redistribution is prohibited.</div>';
+  html += '<div class="disclaimer" style="display:flex;align-items:flex-start;gap:10px;margin-top:16px">'
+    + '<span style="font-size:18px;flex-shrink:0">⚕️</span>'
+    + '<div><strong>Medical Disclaimer:</strong> This analysis is AI-generated for informational purposes only. It may contain errors. '
+    + 'Never change, skip, or stop any medicine without consulting your doctor or pharmacist. '
+    + 'In a medical emergency, call emergency services immediately. '
+    + '<span onclick="document.getElementById(\'legal-modal\').style.display=\'flex\'" style="color:var(--accent);cursor:pointer;text-decoration:underline">Full terms →</span></div>'
+    + '</div>';
+  html += '<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px;padding-bottom:8px">© 2025 MedBill AI · Built by <strong style="background:linear-gradient(90deg,#00D4AA,#0097CC);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Astastarial</strong> · All rights reserved<br>Unauthorized copying or redistribution is prohibited.</div>';
   if(state.genericSavings) {
     html += '<div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px;margin-top:10px">';
     html += '<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px">💰 Generic Medicine Savings</div>';
@@ -1104,7 +1377,11 @@ function renderAnalyzeTab() {
     html += '<button onclick="state.genericSavings=null;renderAnalyzeTab()" style="font-size:12px;color:var(--muted);margin-top:6px;background:none;border:none">✕ Close</button>';
     html += '</div>';
   }
-  html += '<button class="btn-outline" style="width:100%;margin-top:12px" onclick="resetAll()">📂 Analyze Another Document</button>';
+  // Save / Analyze Another buttons
+  html += '<div style="display:flex;gap:8px;margin-top:12px">';
+  html += '<button class="btn-primary" onclick="saveCurrentAnalysis()" style="flex:1;background:rgba(255,209,102,0.15);border:1px solid rgba(255,209,102,0.3);color:var(--gold);font-size:13px">💾 Save This</button>';
+  html += '<button class="btn-outline" onclick="resetAll()" style="flex:1;font-size:13px">📂 New Analysis</button>';
+  html += '</div>';
   html += '</div>';
   c.innerHTML = html;
 }
@@ -1131,7 +1408,7 @@ function renderHero() {
   return `
   <div class="hero fadeUp">
     <div class="hero-pill"><div class="hero-dot"></div>AI Medical Assistant</div>
-    <h1 class="hero-h1">MedBill AI</h1>
+    <h1 class="hero-h1" style="background:linear-gradient(90deg,#00D4AA,#0097CC);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">MedBill AI</h1>
     <p class="hero-sub">Upload your prescription or medical bill. Get instant medicine breakdowns, reminders & more.</p>
     <div class="features">
       <div class="feature-card"><div class="feature-icon">📄</div><div class="feature-title">PDF & Images</div><div class="feature-sub">Upload any format</div></div>
@@ -1141,11 +1418,12 @@ function renderHero() {
     </div>
   </div>
   <!-- About / Ownership Badge -->
-  <div onclick="document.getElementById('about-modal').style.display='flex'" style="display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 0 4px;cursor:pointer">
-    <span style="font-size:11px;color:var(--muted)">Built & owned by</span>
-    <span style="font-size:11px;font-weight:800;color:var(--accent)">Astastarial</span>
+  <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 0 2px;flex-wrap:wrap">
+    <span onclick="openAboutModal()" style="font-size:11px;font-weight:800;background:linear-gradient(90deg,#00D4AA,#0097CC);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;cursor:pointer">Astastarial</span>
+    <span style="font-size:11px;color:var(--muted)">· © 2025 ·</span>
+    <span onclick="document.getElementById('legal-modal').style.display='flex'" style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline">Terms & Privacy</span>
     <span style="font-size:11px;color:var(--muted)">·</span>
-    <span style="font-size:11px;color:var(--muted)">© 2025 All rights reserved</span>
+    <span onclick="showOnboarding()" style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline">Help</span>
   </div>
 
   <div style="padding:0 0 8px">
@@ -1161,6 +1439,7 @@ function renderHero() {
       <button class="btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">📂 Choose File</button>
     </div>
     <div id="err-upload" class="err-box" style="display:none"></div>
+    \${renderSavedAnalysesList()}
     <div class="or-divider">or enter a share code</div>
     <div class="code-row">
       <input class="share-input" id="code-input" placeholder="ENTER CODE" maxlength="6" oninput="this.value=this.value.toUpperCase()">
@@ -1353,10 +1632,12 @@ function renderRemindersTab() {
       <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6">Set times, track stock, and toggle reminders for each medicine.</div>
       ${items}
     </div>
-    <div class="disclaimer" style="margin-top:10px">
-      🔔 <strong>Keep this tab open</strong> for reminders to work.<br>
-      Add the app to your Home Screen for best results.<br>
-      Notification status: <strong style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">${state.notifPerm==='granted'?'✅ Enabled':'❌ ' + state.notifPerm}</strong>
+    <div style="background:rgba(255,209,102,0.08);border:1px solid rgba(255,209,102,0.2);border-radius:14px;padding:14px;margin-top:10px;font-size:12px;color:var(--muted);line-height:1.8">
+      <div style="font-weight:700;color:var(--gold);margin-bottom:6px">⚠️ Important — How Reminders Work</div>
+      <div>✅ <strong style="color:var(--text)">Tab must stay open</strong> — reminders only fire while this tab is open in your browser</div>
+      <div>✅ <strong style="color:var(--text)">Add to Home Screen</strong> — keeps app alive longer on Android</div>
+      <div>✅ <strong style="color:var(--text)">Keep screen on</strong> or plug in charger near medicine time</div>
+      <div style="margin-top:8px">Notification status: <strong style="color:${state.notifPerm==='granted'?'var(--accent)':'var(--warn)'}">${state.notifPerm==='granted'?'✅ Allowed':'❌ '+state.notifPerm}</strong></div>
     </div>
   </div>`;
 }
@@ -1364,14 +1645,17 @@ function renderRemindersTab() {
 /* ── Share Tab ── */
 function renderShareTab() {
   const c = document.getElementById('content');
-  if(!state.result) {
-    c.innerHTML=`
+
+  if (!state.result) {
+    c.innerHTML = `
     <div class="fadeUp">
-      <div class="sec-label">🔗 Load Shared Bill</div>
+      <div class="sec-label">🔗 Load Shared Analysis</div>
       <div class="card">
-        <p style="font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.6">Enter a 6-character code to load a shared bill</p>
+        <p style="font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.6">Enter a 6-character code to load a shared analysis</p>
         <div style="display:flex;gap:8px;margin-bottom:8px">
-          <input class="share-input" id="share-code-input" placeholder="E.g. A3X9KL" maxlength="6" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')loadCode2()">
+          <input class="share-input" id="share-code-input" placeholder="E.g. A3X9KL" maxlength="6"
+            oninput="this.value=this.value.toUpperCase()"
+            onkeydown="if(event.key==='Enter')loadCode2()">
           <button class="btn-primary" style="width:auto;padding:12px 18px" onclick="loadCode2()">Load</button>
         </div>
         <div id="err-share2" style="color:var(--warn);font-size:13px;display:none"></div>
@@ -1381,23 +1665,83 @@ function renderShareTab() {
   }
 
   const code = state.shareCode;
+  const appUrl = 'https://astastarial168-alt.github.io/medbill/';
+  const shareUrl = code ? appUrl + '?code=' + code : appUrl;
+  const patName = state.result.patient_name || 'Patient';
+  const medCount = (state.result.medicines||[]).length;
 
   c.innerHTML = `
   <div class="fadeUp">
-    <div class="sec-label">🔗 Share This Bill</div>
-    <div class="card">
-      <p style="font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:16px">Share your bill analysis with family, caregivers, or your doctor using a 6-character code.</p>
-      ${!code ? `<button class="btn-primary" onclick="generateShareCode()">🔗 Generate Share Code</button>` : `
-        <div style="font-size:12px;color:var(--muted);text-align:center;margin-bottom:8px">Share this code:</div>
-        <div class="share-code">${code}</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px">
-          <button class="btn-ghost" style="flex:1" onclick="copyCode()">📋 Copy Code</button>
-          <button class="btn-outline" style="flex:1" onclick="generateShareCode()">🔄 New Code</button>
-        </div>
-        <div style="font-size:12px;color:var(--muted);text-align:center">Anyone with this code can enter it in the app to load this analysis</div>
-      `}
+    <div class="sec-label">📲 Share This Analysis</div>
+
+    ${!code ? `
+    <div class="card" style="margin-bottom:12px;text-align:center">
+      <div style="font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+        Generate a QR code so family or your doctor can instantly load this analysis — just scan and open.
+      </div>
+      <button class="btn-primary" onclick="generateShareCode()" style="width:100%">
+        📲 Generate QR Code & Share Link
+      </button>
+    </div>` : `
+
+    <!-- QR Code Card -->
+    <div class="card" style="margin-bottom:12px;text-align:center">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">📲 Scan to open on any device</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px">${patName} · ${medCount} medicine${medCount!==1?'s':''}</div>
+      <div id="qr-container" style="display:flex;justify-content:center;margin-bottom:16px">
+        <div id="qrcode" style="background:#fff;padding:16px;border-radius:16px;display:inline-block;box-shadow:0 4px 20px rgba(0,0,0,0.3)"></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Code: <strong style="color:var(--accent);letter-spacing:0.1em">${code}</strong></div>
+      <div style="display:flex;gap:8px">
+        <button onclick="copyShareLink('${shareUrl}')" class="btn-primary" style="flex:1;font-size:13px">🔗 Copy Link</button>
+        <button onclick="shareQRWhatsApp('${code}','${patName}')" class="btn-primary" style="flex:1;background:rgba(37,211,102,0.15);border:1px solid rgba(37,211,102,0.3);color:#25D366;font-size:13px">📲 WhatsApp</button>
+        <button onclick="generateShareCode()" style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--muted)">🔄</button>
+      </div>
     </div>
+    <!-- Or enter code manually -->
+    <div style="font-size:12px;color:var(--muted);text-align:center;margin-bottom:12px">Or share the 6-digit code manually</div>
+    <div class="card" style="text-align:center;padding:16px">
+      <div class="share-code" style="font-size:28px">${code}</div>
+      <div style="font-size:12px;color:var(--muted)">Enter this code in the app's home screen</div>
+    </div>`}
+
   </div>`;
+
+  // Render QR code after DOM is ready
+  if (code) {
+    requestAnimationFrame(() => {
+      const el = document.getElementById('qrcode');
+      if (el && window.QRCode) {
+        el.innerHTML = '';
+        new QRCode(el, {
+          text: shareUrl,
+          width: 180,
+          height: 180,
+          colorDark: '#070D1A',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+    });
+  }
+}
+
+function copyShareLink(url) {
+  navigator.clipboard.writeText(url)
+    .then(() => showAlert('🔗 Share link copied! Send it to anyone.', 4000))
+    .catch(() => showAlert('Link: ' + url));
+}
+
+function shareQRWhatsApp(code, patName) {
+  const url = 'https://astastarial168-alt.github.io/medbill/?code=' + code;
+  const NL = '\n';
+  const msg = '\uD83D\uDC8A *MedBill AI \u2014 Medicine Summary*' + NL + NL
+    + 'Sharing ' + patName + ' prescription on MedBill AI.' + NL + NL
+    + '\uD83D\uDCF2 *Tap the link to view:*' + NL
+    + url + NL + NL
+    + '\uD83D\uDD11 Code: ' + code + NL + NL
+    + '_MedBill AI \u2014 AI-powered medical document assistant_';
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
 /* ── Chat Tab ── */
@@ -1564,6 +1908,9 @@ function markTaken(medName) {
 /* ══════════════════════════════════════════
    CALENDAR TAB
 ══════════════════════════════════════════ */
+// Track whether history panel is open
+let _showCalHistory = false;
+
 function renderCalendarTab() {
   const c = document.getElementById('content');
   if (!state.result) {
@@ -1572,87 +1919,192 @@ function renderCalendarTab() {
   }
   const meds = (state.result.medicines||[]).filter(m => m.name);
   const today = new Date();
-  // Show last 7 days + next 3 days
-  const days = [];
-  for (let i = -6; i <= 3; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    days.push(d);
-  }
+  today.setHours(0,0,0,0);
+  const todayKey = today.toISOString().split('T')[0];
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  // Build day columns
-  let calHtml = '<div style="overflow-x:auto;padding-bottom:8px"><table style="border-collapse:collapse;width:100%;min-width:500px">';
-  // Header row
-  calHtml += '<tr><td style="font-size:11px;color:var(--muted);padding:4px 8px;font-weight:700">Medicine</td>';
-  days.forEach(d => {
-    const isToday = d.toDateString() === today.toDateString();
-    const isPast = d < today && !isToday;
-    calHtml += '<td style="text-align:center;padding:4px 2px;min-width:36px">';
-    calHtml += '<div style="font-size:10px;color:var(--muted)">' + dayNames[d.getDay()] + '</div>';
-    calHtml += '<div style="font-size:12px;font-weight:' + (isToday?'800':'500') + ';color:' + (isToday?'var(--accent)':'var(--text)') + '">' + d.getDate() + '</div>';
-    calHtml += '</td>';
-  });
-  calHtml += '</tr>';
+  const upcomingDays = [];
+  for (let i = 0; i <= 6; i++) {
+    const d = new Date(today); d.setDate(today.getDate() + i); upcomingDays.push(d);
+  }
+  const historyDays = [];
+  for (let i = -30; i <= -1; i++) {
+    const d = new Date(today); d.setDate(today.getDate() + i); historyDays.push(d);
+  }
 
-  // Medicine rows
-  meds.forEach(m => {
-    calHtml += '<tr style="border-top:1px solid var(--border)">';
-    calHtml += '<td style="font-size:12px;color:var(--text);padding:6px 8px;font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + m.name + '">' + esc(m.name.length > 12 ? m.name.substring(0,12)+'…' : m.name) + '</td>';
-    days.forEach(d => {
-      const dateKey = d.toISOString().split('T')[0];
-      const isToday = d.toDateString() === today.toDateString();
-      const isFuture = d > today && !isToday;
-      const taken = state.takenLog[dateKey] && state.takenLog[dateKey][m.name];
-      const isPast = !isFuture && !isToday;
-      let dot, onclick = '';
-      if (isFuture) {
-        dot = '<div style="width:24px;height:24px;border-radius:50%;background:var(--border);margin:auto"></div>';
-      } else if (taken) {
-        dot = '<div style="width:24px;height:24px;border-radius:50%;background:var(--accent);margin:auto;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer" onclick="toggleTaken(\'' + esc(m.name) + '\',\'' + dateKey + '\')">✓</div>';
-      } else {
-        const col = isPast ? 'rgba(255,107,107,0.4)' : 'rgba(255,209,102,0.3)';
-        dot = '<div style="width:24px;height:24px;border-radius:50%;background:' + col + ';margin:auto;cursor:pointer;border:1px dashed var(--border)" onclick="toggleTaken(\'' + esc(m.name) + '\',\'' + dateKey + '\')"></div>';
-      }
-      calHtml += '<td style="text-align:center;padding:4px 2px">' + dot + '</td>';
-    });
-    calHtml += '</tr>';
-  });
-  calHtml += '</table></div>';
-
-  // Legend
+  const takenToday = meds.filter(m => state.takenLog[todayKey]?.[m.name]).length;
   const totalToday = meds.length;
-  const takenToday = meds.filter(m => state.takenLog[today.toISOString().split('T')[0]]?.[m.name]).length;
+  const allDone = takenToday === totalToday && totalToday > 0;
 
-  c.innerHTML = '<div class="fadeUp">' +
-    '<div class="sec-label">📅 Medicine Calendar</div>' +
-    '<div class="card" style="padding:12px">' +
-      '<div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px">' +
-        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--accent);margin-right:4px"></span>Taken</span>' +
-        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(255,107,107,0.4);margin-right:4px"></span>Missed</span>' +
-        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(255,209,102,0.3);margin-right:4px"></span>Today</span>' +
-        '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--border);margin-right:4px"></span>Upcoming</span>' +
-      '</div>' +
-      '<div style="background:var(--adim);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px">' +
-        '💊 Today: <strong style="color:var(--accent)">' + takenToday + '/' + totalToday + ' taken</strong>' +
-        (takenToday === totalToday && totalToday > 0 ? ' 🎉 All done!' : '') +
-      '</div>' +
-      calHtml +
-    '</div>' +
-    '<div class="disclaimer" style="margin-top:10px">Tap any circle to mark taken/missed. Tap again to undo.</div>' +
-  '</div>';
+  // Streak: how many consecutive past days all medicines were taken
+  let streak = 0;
+  for (let i = 1; i <= 60; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const dk = d.toISOString().split('T')[0];
+    if (meds.length > 0 && meds.every(m => state.takenLog[dk]?.[m.name])) streak++;
+    else break;
+  }
+
+  // Best streak ever
+  let bestStreak = parseInt(localStorage.getItem('medbill_best_streak_' + state.currentProfileId) || '0');
+  if (streak > bestStreak) {
+    bestStreak = streak;
+    localStorage.setItem('medbill_best_streak_' + state.currentProfileId, bestStreak);
+  }
+
+  // Family leaderboard: compute streak for all profiles
+  function getProfileStreak(profile) {
+    const pMeds = (profile.result?.medicines||[]).filter(m=>m.name);
+    const pLog = profile.takenLog || {};
+    if (!pMeds.length) return 0;
+    let s = 0;
+    for (let i = 1; i <= 60; i++) {
+      const d2 = new Date(today); d2.setDate(today.getDate() - i);
+      const dk2 = d2.toISOString().split('T')[0];
+      if (pMeds.every(m => pLog[dk2]?.[m.name])) s++;
+      else break;
+    }
+    return s;
+  }
+
+  const familyStreaks = state.profiles
+    .filter(p => (p.result?.medicines||[]).length > 0)
+    .map(p => ({
+      name: p.name, emoji: p.emoji || '👤',
+      streak: p.id === state.currentProfileId ? streak : getProfileStreak(p),
+      isMe: p.id === state.currentProfileId
+    }))
+    .sort((a,b) => b.streak - a.streak);
+
+  function buildCalTable(days) {
+    const minW = (days.length * 40 + 100);
+    let h = '<div style="overflow-x:auto;padding-bottom:4px"><table style="border-collapse:collapse;width:100%;min-width:'+minW+'px">';
+    h += '<tr><td style="font-size:11px;color:var(--muted);padding:4px 8px;font-weight:700;min-width:90px">Medicine</td>';
+    days.forEach(d => {
+      const isToday = d.toDateString() === today.toDateString();
+      h += '<td style="text-align:center;padding:4px 3px;min-width:38px">';
+      h += '<div style="font-size:10px;color:'+(isToday?'var(--accent)':'var(--muted)')+';font-weight:'+(isToday?700:400)+'">'+dayNames[d.getDay()]+'</div>';
+      h += '<div style="font-size:'+(isToday?14:12)+'px;font-weight:'+(isToday?800:500)+';color:'+(isToday?'var(--accent)':'var(--text)')+'">'+d.getDate()+'</div>';
+      h += '</td>';
+    });
+    h += '</tr>';
+    meds.forEach(m => {
+      h += '<tr style="border-top:1px solid var(--border)">';
+      h += '<td style="font-size:12px;color:var(--text);padding:7px 8px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px" title="'+esc(m.name)+'">'+esc(m.name.length>12?m.name.substring(0,12)+'\u2026':m.name)+'</td>';
+      days.forEach(d => {
+        const dk = d.toISOString().split('T')[0];
+        const isToday = d.toDateString() === today.toDateString();
+        const isFuture = d > today;
+        const taken = state.takenLog[dk]?.[m.name];
+        let dot;
+        if (isFuture) {
+          dot = '<div style="width:26px;height:26px;border-radius:50%;border:2px dashed var(--border);margin:auto;opacity:0.4"></div>';
+        } else if (taken) {
+          dot = '<div onclick="toggleTaken(\''+esc(m.name)+'\',\''+dk+'\')" style="width:26px;height:26px;border-radius:50%;background:var(--accent);margin:auto;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer">\u2713</div>';
+        } else if (isToday) {
+          dot = '<div onclick="toggleTaken(\''+esc(m.name)+'\',\''+dk+'\')" style="width:26px;height:26px;border-radius:50%;background:rgba(255,209,102,0.3);border:2px solid var(--gold);margin:auto;cursor:pointer;animation:pulse-icon 1.5s infinite"></div>';
+        } else {
+          dot = '<div onclick="toggleTaken(\''+esc(m.name)+'\',\''+dk+'\')" style="width:26px;height:26px;border-radius:50%;background:rgba(255,107,107,0.2);border:2px solid rgba(255,107,107,0.4);margin:auto;cursor:pointer"></div>';
+        }
+        h += '<td style="text-align:center;padding:5px 3px">'+dot+'</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</table></div>';
+    return h;
+  }
+
+  const histSlice = (_showCalHistory === 'all') ? historyDays : historyDays.slice(-14);
+
+  c.innerHTML = '<div class="fadeUp">'
+
+  // Family leaderboard (only if >1 profile with medicines)
+  const leaderboardHtml = familyStreaks.length > 1 ? (
+    '<div class="sec-label" style="margin-bottom:8px">🏆 Family Streak Leaderboard</div>'
+    + '<div class="card" style="margin-bottom:12px;padding:12px">'
+    + familyStreaks.map((p, i) => {
+        const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'  ';
+        const isMe = p.isMe;
+        const fire = p.streak >= 7 ? ' 🔥' : p.streak >= 3 ? ' ✨' : '';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;'+(i>0?'border-top:1px solid var(--border)':'')+';">'
+          + '<div style="font-size:20px;width:28px;text-align:center">' + medal + '</div>'
+          + '<div style="font-size:20px">' + p.emoji + '</div>'
+          + '<div style="flex:1">'
+          +   '<div style="font-size:13px;font-weight:'+(isMe?800:600)+';color:'+(isMe?'var(--accent)':'var(--text)')+'">'+esc(p.name)+(isMe?' (You)':'')+'</div>'
+          +   '<div style="font-size:11px;color:var(--muted)">' + (p.streak > 0 ? p.streak + '-day streak'+fire : 'No streak yet') + '</div>'
+          + '</div>'
+          + '<div style="font-size:24px;font-weight:900;color:'+(i===0?'var(--gold)':isMe?'var(--accent)':'var(--muted)')+'">'+p.streak+'</div>'
+        + '</div>';
+      }).join('')
+    + (bestStreak > 0 ? '<div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">🏅 Your best streak: <strong style=\"color:var(--gold)\">' + bestStreak + ' days</strong></div>' : '')
+    + '</div>'
+  ) : '';
+
+  // Today summary
+  + '<div style="background:'+(allDone?'var(--adim)':'var(--card)')+';border:1px solid '+(allDone?'var(--aborder)':'var(--border)')+';border-radius:16px;padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:14px">'
+  +   '<div style="font-size:36px">'+(allDone?'\uD83C\uDF89':'\uD83D\uDC8A')+'</div>'
+  +   '<div style="flex:1">'
+  +     '<div style="font-size:15px;font-weight:800;color:var(--text)">'+(allDone?'All medicines taken!':'Today\'s Progress')+'</div>'
+  +     '<div style="font-size:13px;color:var(--muted);margin-top:2px">'+takenToday+' of '+totalToday+' medicines taken</div>'
+  +     (streak>0?'<div style="font-size:12px;color:var(--gold);margin-top:4px">\uD83D\uDD25 '+streak+'-day streak!</div>':'')
+  +   '</div>'
+  +   '<div style="text-align:center">'
+  +     '<div style="font-size:26px;font-weight:900;color:var(--accent)">'+Math.round(takenToday/Math.max(totalToday,1)*100)+'%</div>'
+  +     '<div style="font-size:10px;color:var(--muted)">today</div>'
+  +   '</div>'
+  + '</div>'
+
+  // Upcoming table
+  + leaderboardHtml
+  + '<div class="sec-label">\uD83D\uDCC5 Today & Upcoming (7 Days)</div>'
+  + '<div class="card" style="padding:12px;margin-bottom:12px">'
+  +   '<div style="display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--muted)">'
+  +     '<span style="color:var(--accent)">\u2713 Taken</span>'
+  +     '<span style="color:var(--gold)">\u25CB Today</span>'
+  +     '<span>&#45;&#45; Upcoming</span>'
+  +   '</div>'
+  +   buildCalTable(upcomingDays)
+  + '</div>'
+
+  // History toggle button
+  + '<button onclick="_showCalHistory=!_showCalHistory;renderCalendarTab()" style="width:100%;background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:12px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:12px;cursor:pointer">'
+  +   '\uD83D\uDCCB '+(_showCalHistory?'Hide':'View')+' History (Past 30 Days) '+(_showCalHistory?'\u25B2':'\u25BC')
+  + '</button>'
+
+  + (_showCalHistory
+    ? '<div class="card" style="padding:12px;margin-bottom:12px">'
+    +   '<div style="display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--muted)">'
+    +     '<span style="color:var(--accent)">\u2713 Taken</span>'
+    +     '<span style="color:var(--warn)">\u25CF Missed</span>'
+    +   '</div>'
+    +   buildCalTable(histSlice)
+    +   ((_showCalHistory !== 'all') ? '<button onclick="state._calAll=true;_showCalHistory=true;renderCalendarTab()" style="width:100%;margin-top:10px;background:none;border:1px solid var(--border);border-radius:10px;padding:8px;font-size:12px;color:var(--muted);cursor:pointer">Show full 30-day history</button>' : '')
+    + '</div>'
+    : '')
+
+  + '<div style="font-size:11px;color:var(--muted);text-align:center;padding-bottom:8px">Tap circle to mark taken \u00B7 Tap \u2713 to undo</div>'
+  + '</div>';
 }
 
 function toggleTaken(medName, dateKey) {
   if (!state.takenLog[dateKey]) state.takenLog[dateKey] = {};
-  state.takenLog[dateKey][medName] = !state.takenLog[dateKey][medName];
-  // Update stock if marking taken today
+  const wasTaken = state.takenLog[dateKey][medName];
+  state.takenLog[dateKey][medName] = !wasTaken;
   const today = new Date().toISOString().split('T')[0];
-  if (dateKey === today && state.takenLog[dateKey][medName] && state.stock[medName]?.remaining > 0) {
-    state.stock[medName].remaining--;
-  } else if (dateKey === today && !state.takenLog[dateKey][medName] && state.stock[medName]) {
-    state.stock[medName].remaining = Math.min(state.stock[medName].remaining + 1, state.stock[medName].total);
+  // Auto-deduct stock for today only
+  if (dateKey === today) {
+    if (!wasTaken && state.stock[medName]?.remaining > 0) {
+      state.stock[medName].remaining--;
+      // Refill warning
+      if (state.stock[medName].remaining <= 5) {
+        showAlert('⚠️ Only ' + state.stock[medName].remaining + ' tablets of ' + medName + ' left — refill soon!', 7000);
+      }
+    } else if (wasTaken && state.stock[medName]) {
+      state.stock[medName].remaining = Math.min(
+        (state.stock[medName].remaining || 0) + 1,
+        state.stock[medName].total || 999
+      );
+    }
   }
   saveData();
   renderCalendarTab();
@@ -1769,54 +2221,108 @@ function setLanguage(lang) {
   showAlert('🌐 Language set to ' + lang);
 }
 
-function speakAnalysis() {
-  if (!state.result) return;
-  if (!window.speechSynthesis) { showAlert('Voice not supported in this browser. Try Chrome.'); return; }
+async function speakAnalysis() {
+  if (!state.result) { showAlert('Analyze a document first.'); return; }
+  if (!window.speechSynthesis) { showAlert('Voice not supported. Use Chrome browser.'); return; }
   window.speechSynthesis.cancel();
-  const r = state.result;
+
   const lang = state.language;
   const langCode = {
-    'Hindi': 'hi-IN', 'Tamil': 'ta-IN', 'Bengali': 'bn-IN',
-    'Telugu': 'te-IN', 'Marathi': 'mr-IN', 'English': 'en-IN'
+    'Hindi':'hi-IN','Tamil':'ta-IN','Bengali':'bn-IN',
+    'Telugu':'te-IN','Marathi':'mr-IN','English':'en-IN'
   }[lang] || 'en-IN';
 
-  // Build speech text from result
-  let text = '';
-  if (lang === 'Hindi') {
-    text = 'मेडबिल AI विश्लेषण। ';
-    if (r.patient_name) text += 'मरीज का नाम: ' + r.patient_name + '. ';
-    if (r.diagnosis) text += 'बीमारी: ' + r.diagnosis + '. ';
-    if (r.medicines?.length) {
-      text += 'दवाइयां: ';
-      r.medicines.forEach(m => { text += m.name + ', ' + (m.dosage||'') + ', ' + (m.frequency||'') + '. '; });
+  const r = state.result;
+  const meds = (r.medicines||[]).map(m =>
+    m.name + (m.dosage?' '+m.dosage:'') + (m.frequency?', '+m.frequency:'') +
+    (m.timing?.length?' at '+m.timing.join(' and '):'') +
+    (m.instructions?'. '+m.instructions:'')
+  ).join('. ');
+  const labs = (r.lab_results||[]).filter(l=>l.status&&l.status!=='normal')
+    .map(l => l.test_name+' is '+l.status+' at '+l.value+' '+l.unit).join('. ');
+
+  const langInstr = lang==='Hindi'
+    ? 'in simple conversational Hindi as if a friendly doctor is speaking to a patient. Use easy Hindi words, not medical English. Speak warmly and clearly.'
+    : lang==='English'
+    ? 'in simple conversational English as if a friendly doctor is speaking to an elderly patient. Avoid medical jargon. Be warm, clear and reassuring.'
+    : 'in simple conversational '+lang+' as if a friendly doctor is speaking to a patient. Use easy everyday words.';
+
+  const prompt = `You are a friendly doctor explaining a prescription out loud ${langInstr}.
+Patient: ${r.patient_name||'the patient'}
+Diagnosis: ${r.diagnosis||'not specified'}
+Medicines: ${meds||'none'}
+${labs?'Abnormal lab results: '+labs:''}
+${r.general_instructions?'Instructions: '+r.general_instructions:''}
+${r.follow_up?'Follow-up: '+r.follow_up:''}
+
+Write a natural spoken script that:
+1. Greets the patient by name if available
+2. Briefly explains their condition in simple words
+3. Explains each medicine clearly — what it does, when to take it, how many
+4. Mentions any important warnings
+5. Ends with an encouraging closing message
+Write ONLY the spoken script. No headings, no bullet points. Just natural flowing speech.`;
+
+  showAlert('🔊 Preparing voice explanation…', 4000);
+  try {
+    const body = JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 700, temperature: 0.6
+    });
+    const data = await groqRequest(body, state.apiKey);
+    if (data.error) throw new Error(data.error.message);
+    const script = data.choices?.[0]?.message?.content || '';
+    if (!script) throw new Error('Empty response');
+
+    // Now speak the AI-generated natural script
+    doSpeak(script, langCode, lang);
+  } catch(e) {
+    showAlert('Voice error: ' + e.message);
+  }
+}
+
+function doSpeak(text, langCode, lang) {
+  window.speechSynthesis.cancel();
+  // Split into sentences for better pacing
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  let idx = 0;
+
+  function speakNext() {
+    if (idx >= sentences.length) {
+      showAlert('🔊 Reading complete.', 2000);
+      return;
     }
-    if (r.general_instructions) text += 'निर्देश: ' + r.general_instructions;
-  } else {
-    text = 'MedBill AI Analysis. ';
-    if (r.patient_name) text += 'Patient: ' + r.patient_name + '. ';
-    if (r.diagnosis) text += 'Diagnosis: ' + r.diagnosis + '. ';
-    if (r.medicines?.length) {
-      text += 'Medicines: ';
-      r.medicines.forEach(m => { text += m.name + ', ' + (m.dosage||'') + ', take ' + (m.frequency||'') + '. '; });
-    }
-    if (r.general_instructions) text += 'Instructions: ' + r.general_instructions;
+    const utter = new SpeechSynthesisUtterance(sentences[idx].trim());
+    utter.lang = langCode;
+    utter.rate = 0.82;
+    utter.pitch = 1.05;
+    utter.volume = 1;
+
+    // Find best voice for language
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find(v => v.lang === langCode) ||
+                  voices.find(v => v.lang.startsWith(langCode.split('-')[0])) ||
+                  voices.find(v => v.lang.startsWith('en'));
+    if (match) utter.voice = match;
+
+    utter.onend = () => { idx++; setTimeout(speakNext, 120); };
+    utter.onerror = () => { idx++; speakNext(); };
+    window.speechSynthesis.speak(utter);
   }
 
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = langCode;
-  utter.rate = 0.85;
-  utter.pitch = 1;
-  // Try to find a matching voice
-  const voices = window.speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang.startsWith(langCode.split('-')[0]));
-  if (match) utter.voice = match;
-  utter.onstart = () => showAlert('🔊 Reading aloud in ' + lang + '... Tap again to stop.', 3000);
-  utter.onerror = (e) => showAlert('Voice error: ' + e.error + '. Try Chrome browser.');
-  window.speechSynthesis.speak(utter);
+  // Wait for voices to load on first run
+  if (window.speechSynthesis.getVoices().length === 0) {
+    window.speechSynthesis.onvoiceschanged = () => { speakNext(); };
+  } else {
+    speakNext();
+  }
+  showAlert('🔊 Reading aloud in ' + lang + '. Tap Stop to cancel.', 3000);
 }
 
 function stopVoice() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
+  showAlert('⏹ Voice stopped.', 2000);
 }
 
 /* ══════════════════════════════════════════
@@ -1824,15 +2330,40 @@ function stopVoice() {
 ══════════════════════════════════════════ */
 async function findGenerics() {
   if (!state.result?.medicines?.length) { showAlert('No medicines found to check.'); return; }
-  showAlert('💰 Finding generic alternatives and savings…');
-  const meds = state.result.medicines.map(m => m.name + (m.dosage ? ' ' + m.dosage : '')).join(', ');
-  const prompt = 'For each of these branded medicines, provide the generic (salt) name and approximate Indian market price comparison. Medicines: ' + meds + '. Format as a simple list: Medicine Name → Generic Name → Branded Price → Generic Price → Savings. If government Jan Aushadhi scheme covers it, mention that. Keep it concise and practical for Indian patients.';
+  showAlert('💰 Finding generic alternatives…');
+  const meds = state.result.medicines.map(m => m.name + (m.dosage?' '+m.dosage:'')).join(', ');
+  const prompt = `For each branded medicine below, return a JSON array. Each object must have:
+- "brand": branded medicine name
+- "salt": generic salt/molecule name
+- "branded_price": estimated Indian retail price (e.g. "₹180 for 10 tablets")
+- "generic_price": estimated generic/Jan Aushadhi price (e.g. "₹22 for 10 tablets")
+- "savings_pct": approximate savings percentage as number (e.g. 85)
+- "jan_aushadhi": true or false if available at Jan Aushadhi Kendras
+- "tip": one practical tip for the patient in simple language
+
+Medicines: ${meds}
+Return ONLY valid JSON array. No explanation, no markdown.`;
   try {
-    const body = JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 800, temperature: 0.2 });
+    const body = JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000, temperature: 0.1
+    });
     const data = await groqRequest(body, state.apiKey);
     if (data.error) throw new Error(data.error.message);
-    state.genericSavings = data.choices?.[0]?.message?.content || 'No data found.';
-    renderAnalyzeTab();
+    const raw = data.choices?.[0]?.message?.content || '[]';
+    let parsed;
+    try {
+      const clean = raw.replace(/```json|```/g,'').trim();
+      parsed = JSON.parse(clean);
+    } catch(e) {
+      // Fallback to raw text if JSON fails
+      state.genericSavings = { raw: raw };
+      renderToolsTab(); return;
+    }
+    state.genericSavings = parsed;
+    renderToolsTab();
+    showAlert('💰 Found savings for ' + parsed.length + ' medicines!');
   } catch(e) { showAlert('Error: ' + e.message); }
 }
 
@@ -1907,21 +2438,16 @@ function renderToolsTab() {
     '<button onclick="findGenerics()" class="btn-primary" style="width:100%;margin-bottom:' + (state.genericSavings?'12px':'0') + '">' +
       '💊 Find Generic Alternatives' +
     '</button>' +
-    (state.genericSavings ?
-      '<div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:14px;font-size:13px;color:var(--text);line-height:1.8">' +
-        fmt(state.genericSavings) +
-        '<button onclick="state.genericSavings=null;renderToolsTab()" style="display:block;font-size:12px;color:var(--muted);margin-top:8px;background:none;border:none">✕ Clear</button>' +
-      '</div>'
-    : '') +
+    (state.genericSavings ? renderGenericCards(state.genericSavings) : '') +
   '</div>' +
 
   // ── WHATSAPP CAREGIVER SHARE
   '<div class="sec-label">📲 Caregiver Sharing</div>' +
   '<div class="card" style="margin-bottom:12px">' +
     '<div style="font-size:13px;color:var(--muted);margin-bottom:12px">Share a complete medicine summary on WhatsApp with family or caregivers. They need no app — just a message.</div>' +
-    '<div style="display:flex;gap:8px">' +
-      '<button onclick="shareOnWhatsApp()" class="btn-primary" style="flex:1;background:rgba(37,211,102,0.15);border:1px solid rgba(37,211,102,0.3);color:#25D366;font-size:13px">📲 Share on WhatsApp</button>' +
-      '<button onclick="copyMedicineSummary()" style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--muted)">📋 Copy</button>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button onclick="shareOnWhatsApp()" class="btn-primary" style="flex:1;min-width:140px;background:rgba(37,211,102,0.15);border:1px solid rgba(37,211,102,0.3);color:#25D366;font-size:13px">📲 WhatsApp</button>' +
+      '<button onclick="downloadPDF()" class="btn-primary" style="flex:1;min-width:140px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);color:#A78BFA;font-size:13px">📄 Download PDF</button>' +
     '</div>' +
   '</div>' +
 
@@ -1931,47 +2457,398 @@ function renderToolsTab() {
 /* ══════════════════════════════════════════
    WHATSAPP + CAREGIVER SHARING
 ══════════════════════════════════════════ */
-function buildMedicineSummary() {
-  if (!state.result) return 'No analysis available.';
+/* ══════════════════════════════════════════
+   GENERIC SAVINGS CARDS RENDERER
+══════════════════════════════════════════ */
+function renderGenericCards(data) {
+  if (!data) return '';
+  // Handle raw text fallback
+  if (data.raw) {
+    return '<div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:14px;font-size:13px;color:var(--text);line-height:1.8">' +
+      fmt(data.raw) +
+      '<button onclick="state.genericSavings=null;renderToolsTab()" style="display:block;font-size:12px;color:var(--muted);margin-top:8px;background:none;border:none">✕ Clear</button></div>';
+  }
+  // Estimate total savings
+  let totalBranded = 0, totalGeneric = 0;
+  const cards = data.map(item => {
+    const savPct = item.savings_pct || 0;
+    const barColor = savPct >= 70 ? 'var(--accent)' : savPct >= 40 ? 'var(--gold)' : 'var(--warn)';
+    return '<div style="background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">'
+      +   '<div>'
+      +     '<div style="font-size:14px;font-weight:800;color:var(--text)">' + esc(item.brand||'') + '</div>'
+      +     '<div style="font-size:12px;color:var(--accent);margin-top:2px">Generic: ' + esc(item.salt||'') + '</div>'
+      +   '</div>'
+      +   (item.jan_aushadhi ? '<span style="background:rgba(0,212,170,0.15);color:var(--accent);border:1px solid var(--aborder);border-radius:99px;padding:3px 8px;font-size:10px;font-weight:700;flex-shrink:0">Jan Aushadhi ✓</span>' : '')
+      + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+      +   '<div style="background:rgba(255,107,107,0.08);border-radius:10px;padding:8px;text-align:center">'
+      +     '<div style="font-size:10px;color:var(--muted);margin-bottom:2px">Branded</div>'
+      +     '<div style="font-size:13px;font-weight:700;color:var(--warn)">' + esc(item.branded_price||'N/A') + '</div>'
+      +   '</div>'
+      +   '<div style="background:rgba(0,212,170,0.08);border-radius:10px;padding:8px;text-align:center">'
+      +     '<div style="font-size:10px;color:var(--muted);margin-bottom:2px">Generic</div>'
+      +     '<div style="font-size:13px;font-weight:700;color:var(--accent)">' + esc(item.generic_price||'N/A') + '</div>'
+      +   '</div>'
+      + '</div>'
+      + '<div style="margin-bottom:8px">'
+      +   '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px"><span>Savings</span><span style="color:'+barColor+';font-weight:700">~'+savPct+'%</span></div>'
+      +   '<div style="background:var(--border);border-radius:99px;height:6px"><div style="background:'+barColor+';width:'+Math.min(100,savPct)+'%;height:6px;border-radius:99px"></div></div>'
+      + '</div>'
+      + (item.tip ? '<div style="font-size:12px;color:var(--muted);background:var(--adim);border-radius:8px;padding:8px">💡 ' + esc(item.tip) + '</div>' : '')
+      + '</div>';
+  }).join('');
+
+  return '<div style="margin-top:4px">'
+    + '<div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:12px;margin-bottom:10px;text-align:center">'
+    +   '<div style="font-size:12px;color:var(--muted)">Estimated monthly savings if switching to generics</div>'
+    +   '<div style="font-size:22px;font-weight:800;color:var(--accent);margin-top:4px">Up to ' + data.length * 60 + '% savings</div>'
+    +   '<div style="font-size:11px;color:var(--warn);margin-top:4px">⚠️ AI estimates only — verify prices at your pharmacy</div>'
+    + '</div>'
+    + cards
+    + '<button onclick="state.genericSavings=null;renderToolsTab()" style="width:100%;padding:10px;background:transparent;border:1px solid var(--border);border-radius:10px;font-size:13px;color:var(--muted);margin-top:4px">✕ Clear Results</button>'
+    + '</div>';
+}
+
+/* ══════════════════════════════════════════
+   PDF GENERATION + SHARE
+══════════════════════════════════════════ */
+function generatePDFBlob() {
   const r = state.result;
-  const NL = '\n';
-  let text = '💊 *MedBill AI — Medicine Summary*' + NL + NL;
-  if (r.patient_name) text += '👤 Patient: ' + r.patient_name + NL;
-  if (r.diagnosis) text += '🏥 Diagnosis: ' + r.diagnosis + NL;
-  if (r.doctor_name) text += '👨‍⚕️ Doctor: ' + r.doctor_name + NL;
-  if (r.date) text += '📅 Date: ' + r.date + NL;
-  text += NL + '*Medicines:*' + NL;
-  (r.medicines||[]).forEach((m, i) => {
-    text += (i+1) + '. ' + m.name;
-    if (m.dosage) text += ' - ' + m.dosage;
-    if (m.frequency) text += ' - ' + m.frequency;
-    if (m.timing && m.timing.length) text += ' (' + m.timing.join(', ') + ')';
-    if (m.instructions) text += NL + '   Instructions: ' + m.instructions;
-    text += NL;
-  });
-  if (r.general_instructions) text += NL + 'Instructions: ' + r.general_instructions + NL;
-  if (r.follow_up) text += NL + 'Follow-up: ' + r.follow_up + NL;
-  text += NL + 'Shared via MedBill AI - astastarial168-alt.github.io/medbill';
-  return text;
+  if (!r) return null;
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
+
+  // Build a full HTML page for PDF
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; color: #1a1a2e; padding: 32px; font-size: 13px; line-height: 1.6; }
+  .header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #00D4AA; padding-bottom: 16px; margin-bottom: 20px; }
+  .logo { font-size: 36px; }
+  .app-name { font-size: 22px; font-weight: 900; color: #00D4AA; }
+  .app-sub { font-size: 11px; color: #666; }
+  .generated { font-size: 11px; color: #999; margin-top: 4px; }
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 13px; font-weight: 800; color: #00A882; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e0f0ec; padding-bottom: 6px; margin-bottom: 12px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .info-item { background: #f4fbf9; border-radius: 8px; padding: 8px 12px; }
+  .info-label { font-size: 10px; color: #888; font-weight: 700; text-transform: uppercase; }
+  .info-value { font-size: 13px; font-weight: 600; color: #1a1a2e; margin-top: 2px; }
+  .med-card { background: #f8fffe; border: 1px solid #d0f0e8; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+  .med-name { font-size: 15px; font-weight: 800; color: #00A882; }
+  .med-detail { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .med-badge { background: #e0f5f0; color: #00896e; border-radius: 99px; padding: 2px 10px; font-size: 11px; font-weight: 600; }
+  .med-timing { font-size: 12px; color: #555; margin-top: 6px; }
+  .med-instruction { font-size: 11px; color: #777; margin-top: 4px; font-style: italic; }
+  .lab-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .lab-card { border-radius: 8px; padding: 10px; text-align: center; }
+  .lab-normal { background: #f0faf5; border: 1px solid #c0e8d8; }
+  .lab-high { background: #fff5f5; border: 1px solid #ffd0d0; }
+  .lab-low { background: #fffaf0; border: 1px solid #ffe0a0; }
+  .lab-name { font-size: 10px; color: #666; font-weight: 700; }
+  .lab-val { font-size: 15px; font-weight: 800; margin-top: 2px; }
+  .lab-normal .lab-val { color: #00896e; }
+  .lab-high .lab-val { color: #c0392b; }
+  .lab-low .lab-val { color: #d4880a; }
+  .lab-range { font-size: 10px; color: #999; margin-top: 2px; }
+  .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #ddd; text-align: center; font-size: 10px; color: #999; }
+  .disclaimer { background: #fff8e8; border: 1px solid #ffe082; border-radius: 8px; padding: 10px; font-size: 11px; color: #8a6a00; margin-top: 16px; }
+  @media print { body { padding: 16px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">💊</div>
+  <div>
+    <div class="app-name">MedBill AI</div>
+    <div class="app-sub">AI-Powered Medical Document Analyzer</div>
+    <div class="generated">Generated: ${dateStr} &nbsp;|&nbsp; astastarial168-alt.github.io/medbill</div>
+  </div>
+</div>
+
+${r.patient_name||r.doctor_name||r.diagnosis ? `
+<div class="section">
+  <div class="section-title">Patient Information</div>
+  <div class="info-grid">
+    ${r.patient_name ? '<div class="info-item"><div class="info-label">Patient Name</div><div class="info-value">'+r.patient_name+'</div></div>' : ''}
+    ${r.patient_age ? '<div class="info-item"><div class="info-label">Age</div><div class="info-value">'+r.patient_age+'</div></div>' : ''}
+    ${r.patient_gender ? '<div class="info-item"><div class="info-label">Gender</div><div class="info-value">'+r.patient_gender+'</div></div>' : ''}
+    ${r.doctor_name ? '<div class="info-item"><div class="info-label">Doctor</div><div class="info-value">'+r.doctor_name+'</div></div>' : ''}
+    ${r.hospital ? '<div class="info-item"><div class="info-label">Hospital</div><div class="info-value">'+r.hospital+'</div></div>' : ''}
+    ${r.date ? '<div class="info-item"><div class="info-label">Date</div><div class="info-value">'+r.date+'</div></div>' : ''}
+    ${r.diagnosis ? '<div class="info-item" style="grid-column:1/-1"><div class="info-label">Diagnosis</div><div class="info-value">'+r.diagnosis+'</div></div>' : ''}
+  </div>
+</div>` : ''}
+
+${r.medicines?.length ? `
+<div class="section">
+  <div class="section-title">Prescribed Medicines (${r.medicines.length})</div>
+  ${r.medicines.map(m => `
+  <div class="med-card">
+    <div class="med-name">${m.name}</div>
+    <div class="med-detail">
+      ${m.dosage ? '<span class="med-badge">💊 '+m.dosage+'</span>' : ''}
+      ${m.frequency ? '<span class="med-badge">🔄 '+m.frequency+'</span>' : ''}
+      ${m.duration ? '<span class="med-badge">📅 '+m.duration+'</span>' : ''}
+      ${m.form ? '<span class="med-badge">'+m.form+'</span>' : ''}
+    </div>
+    ${m.timing?.length ? '<div class="med-timing">⏰ Take at: '+m.timing.join(' | ')+'</div>' : ''}
+    ${m.purpose ? '<div class="med-instruction">Purpose: '+m.purpose+'</div>' : ''}
+    ${m.instructions ? '<div class="med-instruction">📋 '+m.instructions+'</div>' : ''}
+    ${m.warnings?.length ? '<div class="med-instruction" style="color:#c0392b">⚠️ '+m.warnings.join(' | ')+'</div>' : ''}
+  </div>`).join('')}
+</div>` : ''}
+
+${r.lab_results?.length ? `
+<div class="section">
+  <div class="section-title">Lab Results (${r.lab_results.length})</div>
+  <div class="lab-grid">
+    ${r.lab_results.map(l => `
+    <div class="lab-card lab-${l.status||'normal'}">
+      <div class="lab-name">${l.test_name}</div>
+      <div class="lab-val">${l.value} ${l.unit||''}</div>
+      <div class="lab-range">Normal: ${l.normal_range||'—'}</div>
+    </div>`).join('')}
+  </div>
+</div>` : ''}
+
+${r.general_instructions ? `
+<div class="section">
+  <div class="section-title">General Instructions</div>
+  <p style="font-size:13px;color:#333">${r.general_instructions}</p>
+</div>` : ''}
+
+${r.follow_up ? `
+<div class="section">
+  <div class="section-title">Follow-up</div>
+  <p style="font-size:13px;color:#333">📅 ${r.follow_up}</p>
+</div>` : ''}
+
+<div class="disclaimer">
+  ⚕️ This report is generated by AI for informational purposes only. Always follow your doctor's advice. Do not change or stop medicines without consulting your doctor.
+</div>
+
+<div class="footer">
+  Generated by MedBill AI &nbsp;•&nbsp; astastarial168-alt.github.io/medbill &nbsp;•&nbsp; © Astastarial 2025
+</div>
+</body>
+</html>`;
+
+  return html;
+}
+
+function downloadPDF() {
+  if (!state.result) { showAlert('Analyze a document first.'); return; }
+  const html = generatePDFBlob();
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const name = (state.result.patient_name || 'Medicine').replace(/\s+/g,'_');
+  a.download = 'MedBill_' + name + '_' + new Date().toISOString().split('T')[0] + '.html';
+  a.click();
+  URL.revokeObjectURL(url);
+  showAlert('📄 Report downloaded! Open it → Print → Save as PDF.', 6000);
 }
 
 function shareOnWhatsApp() {
   if (!state.result) { showAlert('Analyze a document first.'); return; }
-  const text = buildMedicineSummary();
-  const url = 'https://wa.me/?text=' + encodeURIComponent(text);
+  // Build WhatsApp message — clean and structured
+  const r = state.result;
+  const NL = '\n';
+  let msg = '💊 *Medicine Summary — MedBill AI*' + NL;
+  msg += '━━━━━━━━━━━━━━━━━━━━━' + NL;
+  if (r.patient_name) msg += '👤 *Patient:* ' + r.patient_name + NL;
+  if (r.doctor_name) msg += '👨‍⚕️ *Doctor:* ' + r.doctor_name + NL;
+  if (r.diagnosis) msg += '🏥 *Condition:* ' + r.diagnosis + NL;
+  if (r.date) msg += '📅 *Date:* ' + r.date + NL;
+  msg += NL + '*💊 Medicines:*' + NL + '━━━━━━━━━━━━━━━━━━━━━' + NL;
+  (r.medicines||[]).forEach((m, i) => {
+    msg += NL + (i+1) + '. *' + m.name + '*';
+    if (m.dosage) msg += ' — ' + m.dosage;
+    if (m.frequency) msg += NL + '   🔄 ' + m.frequency;
+    if (m.timing?.length) msg += NL + '   ⏰ ' + m.timing.join(', ');
+    if (m.instructions) msg += NL + '   📋 ' + m.instructions;
+    if (m.warnings?.length) msg += NL + '   ⚠️ ' + m.warnings[0];
+    msg += NL;
+  });
+  if (r.general_instructions) msg += NL + '*📋 Instructions:*' + NL + r.general_instructions + NL;
+  if (r.follow_up) msg += NL + '*📅 Follow-up:* ' + r.follow_up + NL;
+  msg += NL + '━━━━━━━━━━━━━━━━━━━━━' + NL;
+  msg += '_For detailed PDF report, open MedBill AI:_' + NL;
+  msg += '_astastarial168-alt.github.io/medbill_';
+  const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
   window.open(url, '_blank');
 }
 
 function copyMedicineSummary() {
   if (!state.result) { showAlert('Analyze a document first.'); return; }
-  const text = buildMedicineSummary();
-  navigator.clipboard.writeText(text).then(() => showAlert('📋 Summary copied! Paste in any app.')).catch(() => showAlert('Copy failed — try WhatsApp share instead.'));
+  shareOnWhatsApp();
 }
 
 /* ══════════════════════════════════════════
    COUNTERFEIT FILE HANDLER
 ══════════════════════════════════════════ */
 
+
+/* ══════════════════════════════════════════
+   SAVED ANALYSES
+══════════════════════════════════════════ */
+function renderSavedAnalysesList() {
+  if (!state.savedAnalyses || state.savedAnalyses.length === 0) return '';
+  const cards = state.savedAnalyses.slice().reverse().map((a, ri) => {
+    const i = state.savedAnalyses.length - 1 - ri; // original index
+    const docIcon = a.type==='lab_report'||a.type==='blood_test' ? '🧪' : a.type==='discharge_summary' ? '🏥' : '📋';
+    const medCount = (a.medicines||[]).length;
+    const labCount = (a.lab_results||[]).length;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card2);border:1px solid var(--border);border-radius:12px;margin-bottom:8px">'
+      + '<div style="font-size:24px;flex-shrink:0">' + docIcon + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(a.label||'Untitled') + '</div>'
+      +   '<div style="font-size:11px;color:var(--muted);margin-top:2px">'
+      +     (a.patient_name ? a.patient_name + ' · ' : '')
+      +     (medCount>0 ? medCount+' med'+(medCount>1?'s':'') : '')
+      +     (labCount>0 ? (medCount>0?' · ':'')+labCount+' lab'+(labCount>1?'s':'') : '')
+      +     (a.savedAt ? ' · ' + new Date(a.savedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '')
+      +   '</div>'
+      + '</div>'
+      + '<button onclick="loadSavedAnalysis(' + i + ')" style="background:var(--adim);border:1px solid var(--aborder);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;color:var(--accent);flex-shrink:0">Load</button>'
+      + '<button onclick="deleteSavedAnalysis(' + i + ')" style="background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.25);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--warn);flex-shrink:0">✕</button>'
+      + '</div>';
+  }).join('');
+
+  return '<div style="margin-bottom:8px">'
+    + '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📁 Saved Analyses (' + state.savedAnalyses.length + ')</div>'
+    + cards
+    + '</div>';
+}
+
+function saveCurrentAnalysis() {
+  if (!state.result) { showAlert('Nothing to save — analyze a document first.'); return; }
+  const r = state.result;
+  // Build a label from available info
+  const parts = [];
+  if (r.patient_name) parts.push(r.patient_name);
+  const typeLabel = {
+    prescription: 'Prescription', lab_report: 'Lab Report', blood_test: 'Blood Test',
+    discharge_summary: 'Discharge', medical_bill: 'Bill', other: 'Document'
+  }[r.type||r.document_type] || 'Document';
+  parts.push(typeLabel);
+  if (r.date) parts.push(r.date);
+  const defaultLabel = parts.join(' — ');
+
+  // Prompt for name
+  const label = window.prompt('Name this analysis:', defaultLabel);
+  if (label === null) return; // cancelled
+
+  const entry = {
+    label: label.trim() || defaultLabel,
+    savedAt: Date.now(),
+    type: r.document_type || 'other',
+    patient_name: r.patient_name || null,
+    medicines: r.medicines || [],
+    lab_results: r.lab_results || [],
+    result: r, // full result
+    reminders: { ...state.reminders },
+    stock: { ...state.stock },
+    takenLog: { ...state.takenLog },
+    msgs: [...state.msgs]
+  };
+
+  state.savedAnalyses.push(entry);
+  localStorage.setItem('medbill_saved_analyses', JSON.stringify(state.savedAnalyses));
+  showAlert('💾 Saved as "' + entry.label + '"!', 4000);
+}
+
+function loadSavedAnalysis(index) {
+  const entry = state.savedAnalyses[index];
+  if (!entry) return;
+  // Confirm if current analysis will be lost
+  if (state.result) {
+    if (!window.confirm('Load "' + entry.label + '"? Your current unsaved analysis will be cleared.')) return;
+  }
+  // Restore everything
+  state.result = entry.result;
+  state.reminders = entry.reminders || {};
+  state.stock = entry.stock || {};
+  state.takenLog = entry.takenLog || {};
+  state.msgs = entry.msgs || [];
+  state.file = null;
+  state.genericSavings = null;
+  state.simpleMode = false;
+
+  // Show tabs
+  const badge = document.getElementById('nav-badge');
+  const medCount = (state.result.medicines||[]).length;
+  const labCount = (state.result.lab_results||[]).length;
+  if (badge) {
+    badge.style.display = '';
+    badge.textContent = medCount>0&&labCount>0 ? medCount+'m '+labCount+'l' : medCount>0 ? medCount+' meds' : labCount+' labs';
+  }
+  document.getElementById('tabbar').style.display = 'flex';
+  scheduleReminders();
+  switchTab('analyze');
+  showAlert('📋 Loaded: ' + entry.label, 3000);
+}
+
+function deleteSavedAnalysis(index) {
+  const entry = state.savedAnalyses[index];
+  if (!entry) return;
+  if (!window.confirm('Delete "' + entry.label + '"?')) return;
+  state.savedAnalyses.splice(index, 1);
+  localStorage.setItem('medbill_saved_analyses', JSON.stringify(state.savedAnalyses));
+  renderContent(); // refresh hero
+  showAlert('🗑️ Deleted "' + entry.label + '"', 3000);
+}
+
+/* ══════════════════════════════════════════
+   DEMO MODE
+══════════════════════════════════════════ */
+function loadDemoAnalysis() {
+  const demo = {
+    document_type: 'prescription',
+    patient_name: 'Priya Sharma',
+    patient_age: '42',
+    patient_gender: 'Female',
+    doctor_name: 'Dr. Rajesh Kumar',
+    hospital: 'City Medical Centre',
+    date: new Date().toLocaleDateString('en-IN'),
+    diagnosis: 'Type 2 Diabetes with Hypertension',
+    confidence: 'high',
+    confidence_reason: null,
+    medicines: [
+      { name: 'Metformin', generic_name: 'Metformin HCl', category: 'Antidiabetic', purpose: 'Controls blood sugar levels', dosage: '500mg', frequency: 'Twice daily', duration: '30 days', form: 'Tablet', timing: ['Morning - 8:00 AM', 'Night - 9:00 PM'], instructions: 'Take with meals', warnings: ['Do not skip meals while taking this medicine'] },
+      { name: 'Amlodipine', generic_name: 'Amlodipine Besylate', category: 'Antihypertensive', purpose: 'Lowers blood pressure', dosage: '5mg', frequency: 'Once daily', duration: '30 days', form: 'Tablet', timing: ['Morning - 8:00 AM'], instructions: 'Take at the same time every day', warnings: [] },
+      { name: 'Vitamin D3', generic_name: 'Cholecalciferol', category: 'Supplement', purpose: 'Vitamin D supplement for bone health', dosage: '60000 IU', frequency: 'Once weekly', duration: '12 weeks', form: 'Capsule', timing: ['Sunday - 9:00 AM'], instructions: 'Take after a fatty meal', warnings: [] }
+    ],
+    lab_results: [
+      { test_name: 'Fasting Blood Sugar', value: '148', unit: 'mg/dL', normal_range: '70-100', status: 'high', interpretation: 'Elevated — diabetes management needed' },
+      { test_name: 'HbA1c', value: '7.8', unit: '%', normal_range: '<7.0', status: 'high', interpretation: 'Poor diabetic control over last 3 months' },
+      { test_name: 'Hemoglobin', value: '11.8', unit: 'g/dL', normal_range: '12.0-16.0', status: 'low', interpretation: 'Mild anemia' },
+      { test_name: 'Serum Creatinine', value: '0.9', unit: 'mg/dL', normal_range: '0.6-1.2', status: 'normal', interpretation: 'Kidney function normal' },
+      { test_name: 'Blood Pressure', value: '138/88', unit: 'mmHg', normal_range: '<120/80', status: 'high', interpretation: 'Stage 1 hypertension' }
+    ],
+    vitals: { blood_pressure: '138/88 mmHg', pulse: '78 bpm', weight: '68 kg', height: '162 cm', bmi: '25.9' },
+    general_instructions: 'Avoid sugary foods and white rice. Walk 30 minutes daily. Monitor BP at home every morning. Follow low-salt diet.',
+    follow_up: 'After 4 weeks — bring updated sugar log',
+    summary: 'Prescription for diabetes and hypertension management with 3 medicines and lab monitoring.'
+  };
+
+  state.result = demo;
+  state.file = null;
+  state.msgs = [{ role: 'assistant', content: 'Hi! This is a demo analysis for Priya Sharma. Found 3 medicines for diabetes and blood pressure. 2 lab values are high (blood sugar and BP). Ask me anything about this prescription!' }];
+  state.reminders = { 'Metformin': false, 'Amlodipine': false, 'Vitamin D3': false };
+
+  const badge = document.getElementById('nav-badge');
+  if (badge) { badge.style.display = ''; badge.textContent = '3 meds'; }
+  document.getElementById('tabbar').style.display = 'flex';
+  switchTab('analyze');
+  showAlert('🎯 Demo loaded! This is a sample prescription — explore all features.', 5000);
+}
 
 function resetAll() {
   state.file=null; state.result=null; state.msgs=[]; state.shareCode=null; state.reminders={};
@@ -2155,6 +3032,15 @@ function openProfileModal() {
   document.getElementById('profile-modal').style.display = 'flex';
 }
 
+function openAboutModal() {
+  const el = document.getElementById('consent-date-display');
+  if (el) {
+    const d = localStorage.getItem('medbill_consent_date');
+    el.textContent = d ? new Date(d).toLocaleDateString('en-IN', {day:'numeric',month:'long',year:'numeric'}) : 'Not recorded';
+  }
+  document.getElementById('about-modal').style.display = 'flex';
+}
+
 /* ── Apply saved theme ── */
 (function() {
   const saved = localStorage.getItem('medbill_theme');
@@ -2165,13 +3051,56 @@ function openProfileModal() {
   }
 })();
 
+/* ── Onboarding / Consent Functions ── */
+function nextStep(n) {
+  document.querySelectorAll('.onboard-step').forEach((s,i) => s.classList.toggle('active', i===n));
+  document.querySelectorAll('.onboard-dot').forEach((d,i) => d.classList.toggle('active', i===n));
+}
+
+function agreeAndStart() {
+  const cb = document.getElementById('consent-check');
+  if (cb && !cb.checked) {
+    cb.parentElement.style.border = '2px solid var(--warn)';
+    cb.parentElement.style.borderRadius = '12px';
+    showAlert('Please tick the checkbox to confirm you have read the terms.', 4000);
+    return;
+  }
+  localStorage.setItem('medbill_consented', '1');
+  localStorage.setItem('medbill_consent_date', new Date().toISOString());
+  document.getElementById('consent-overlay').style.display = 'none';
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(p => { state.notifPerm = p; });
+  }
+}
+
+// Enable agree button when checkbox ticked
+document.addEventListener('change', function(e) {
+  if (e.target && e.target.id === 'consent-check') {
+    const btn = document.getElementById('agree-btn');
+    if (btn) {
+      btn.style.opacity = e.target.checked ? '1' : '0.4';
+      btn.style.pointerEvents = e.target.checked ? 'auto' : 'none';
+    }
+    if (e.target.parentElement) {
+      e.target.parentElement.style.border = e.target.checked ? '1px solid var(--aborder)' : '1px solid var(--border)';
+    }
+  }
+});
+
+function showOnboarding() {
+  document.getElementById('consent-overlay').style.display = 'flex';
+  nextStep(0);
+}
+
 /* ── Initial render — load profiles and saved data ── */
 loadProfiles();
 scheduleReminders();
 renderContent();
 
-/* ── Auto-request notification permission after 3s ── */
-if ('Notification' in window && Notification.permission === 'default') {
+/* ── Show onboarding on first visit ── */
+if (!localStorage.getItem('medbill_consented')) {
+  showOnboarding();
+} else if ('Notification' in window && Notification.permission === 'default') {
   setTimeout(() => {
     Notification.requestPermission().then(p => { state.notifPerm = p; });
   }, 3000);
@@ -2184,7 +3113,7 @@ if ('Notification' in window && Notification.permission === 'default') {
     <div style="text-align:center;margin-bottom:20px">
       <div style="font-size:40px;margin-bottom:8px">💊</div>
       <div style="font-size:20px;font-weight:800;color:var(--text)">MedBill AI</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 21 · 2025</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Version 27 · 2025</div>
     </div>
     <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:14px;padding:14px 16px;margin-bottom:16px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Created & owned by</div>
@@ -2196,10 +3125,76 @@ if ('Notification' in window && Notification.permission === 'default') {
       This app, its design, code, and concept are the intellectual property of the creator.<br><br>
       Unauthorized copying, redistribution, or claiming ownership of this app is strictly prohibited.
     </div>
-    <div style="font-size:11px;color:var(--muted);background:var(--card2);border-radius:10px;padding:10px 12px;margin-bottom:16px">
-      🔒 <strong style="color:var(--text)">Privacy First</strong> — Your medical documents are processed securely and never stored on any server.
+    <div style="font-size:11px;color:var(--muted);background:var(--card2);border-radius:10px;padding:10px 12px;margin-bottom:10px">
+      🔒 <strong style="color:var(--text)">Privacy First</strong> — Documents are processed by AI and never stored on any server. All data lives on your device only.
     </div>
+    <div style="font-size:11px;color:var(--muted);background:var(--card2);border-radius:10px;padding:10px 12px;margin-bottom:16px">
+      ✅ <strong style="color:var(--text)">Terms agreed:</strong> <span id="consent-date-display">Loading…</span>
+    </div>
+    <button onclick="document.getElementById('about-modal').style.display='none';document.getElementById('legal-modal').style.display='flex'" style="width:100%;margin-bottom:10px;background:transparent;border:1px solid var(--border);border-radius:12px;padding:10px;font-size:13px;color:var(--muted);cursor:pointer">📋 Read Full Terms & Privacy Policy</button>
     <button onclick="document.getElementById('about-modal').style.display='none'" class="btn-primary" style="width:100%">Close</button>
+  </div>
+</div>
+
+<!-- Legal Modal -->
+<div id="legal-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:24px;max-width:400px;width:100%;margin:auto;position:relative">
+    <button onclick="document.getElementById('legal-modal').style.display='none'" style="position:absolute;top:16px;right:16px;font-size:20px;color:var(--muted);background:none;border:none">✕</button>
+    <div style="font-size:20px;font-weight:900;color:var(--text);margin-bottom:4px">📋 Legal Information</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:20px">MedBill AI by Astastarial · Last updated: January 2025</div>
+
+    <!-- Medical Disclaimer -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:800;color:var(--warn);margin-bottom:8px">⚕️ Medical Disclaimer</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.8">
+        MedBill AI is an informational tool powered by artificial intelligence. It is <strong style="color:var(--text)">NOT a medical device</strong>, NOT a licensed healthcare service, and is <strong style="color:var(--text)">NOT a substitute for professional medical advice, diagnosis, or treatment</strong>.<br><br>
+        The AI may occasionally misread unclear, blurry, or partially visible documents. Medicine names, dosages, timings, and lab interpretations may be inaccurate. <strong style="color:var(--text)">Always verify all information with a qualified doctor or pharmacist</strong> before making any health decision.<br><br>
+        <strong style="color:var(--warn)">Never change, skip, reduce, or stop any medication based solely on information from this app.</strong> In a medical emergency, call emergency services (112 in India) immediately — do not use this app.
+      </div>
+    </div>
+
+    <!-- Limitation of Liability -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:800;color:var(--gold);margin-bottom:8px">⚠️ Limitation of Liability</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.8">
+        To the maximum extent permitted by applicable law, Astastarial and the creators of MedBill AI shall not be liable for any direct, indirect, incidental, consequential, or punitive damages arising from your use of this app or reliance on its output — including but not limited to health decisions, medication errors, or misdiagnosis.<br><br>
+        This app is provided "as is" without warranties of any kind, express or implied, including accuracy, completeness, or fitness for a particular purpose.
+      </div>
+    </div>
+
+    <!-- Privacy Policy -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:800;color:var(--accent);margin-bottom:8px">🔒 Privacy Policy</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.8">
+        <strong style="color:var(--text)">What we collect:</strong> Nothing. We do not collect, store, or transmit your personal data to any server owned by us.<br><br>
+        <strong style="color:var(--text)">AI processing:</strong> When you upload a document, the image is sent to Groq (a third-party AI service) for analysis. This is necessary for the app to function. Groq's own privacy policy applies to this processing. We do not store the images or results on any server.<br><br>
+        <strong style="color:var(--text)">Local storage:</strong> All data (analysis results, reminders, profiles) is stored only on your own device using browser localStorage. Clearing your browser data will erase it permanently.<br><br>
+        <strong style="color:var(--text)">No tracking:</strong> We use no analytics, no advertising, no cookies, and no third-party tracking of any kind.<br><br>
+        <strong style="color:var(--text)">Sharing:</strong> If you choose to share a document via the Share tab, a copy is stored in your browser's localStorage only and accessible to anyone with the 6-digit code you share.
+      </div>
+    </div>
+
+    <!-- Terms of Use -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px">📄 Terms of Use</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.8">
+        • You must be 18 years of age or older to use this app, or be supervised by a parent or guardian<br>
+        • Do not upload documents belonging to other people without their explicit consent<br>
+        • This app is licensed for personal, non-commercial use only<br>
+        • Do not attempt to reverse-engineer, copy, or redistribute this app or its code<br>
+        • We reserve the right to update these terms at any time<br>
+        • Continued use of the app constitutes acceptance of any updated terms
+      </div>
+    </div>
+
+    <!-- IP Notice -->
+    <div style="background:var(--adim);border:1px solid var(--aborder);border-radius:12px;padding:12px;margin-bottom:16px;font-size:12px;color:var(--muted)">
+      © 2025 <strong style="color:var(--accent)">Astastarial</strong>. All rights reserved.<br>
+      MedBill AI, its design, concept, and code are the intellectual property of the creator.<br>
+      Unauthorized copying, cloning, redistribution, or claiming ownership is strictly prohibited and may result in legal action.
+    </div>
+
+    <button onclick="document.getElementById('legal-modal').style.display='none'" class="btn-primary" style="width:100%">Close</button>
   </div>
 </div>
 
