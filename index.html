@@ -473,10 +473,26 @@ self.addEventListener('activate', e => e.waitUntil(clients.claim()));
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || self.location.origin;
-  e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list => {
-    for (const c of list) { if ('focus' in c) return c.focus(); }
-    if (clients.openWindow) return clients.openWindow(url);
-  }));
+  const medName = e.notification.data && e.notification.data.medName;
+  if (e.action === 'taken' && medName) {
+    // Post message to app to mark medicine as taken
+    e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list => {
+      for (const c of list) {
+        c.postMessage({ type: 'MARK_TAKEN', medName });
+        return c.focus ? c.focus() : null;
+      }
+      if (clients.openWindow) return clients.openWindow(url + '#mark-taken-' + encodeURIComponent(medName));
+    }));
+  } else if (e.action === 'dismiss') {
+    // Just close the notification, do nothing
+    return;
+  } else {
+    // Default tap - open/focus the app
+    e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list => {
+      for (const c of list) { if ('focus' in c) return c.focus(); }
+      if (clients.openWindow) return clients.openWindow(url);
+    }));
+  }
 });
 self.addEventListener('fetch', e => {
   if(e.request.url.includes('googleapis.com') || e.request.url.includes('fonts.google')) {
@@ -488,7 +504,16 @@ self.addEventListener('fetch', e => {
 `;
 const swBlob = new Blob([swCode], {type:'text/javascript'});
 const swUrl = URL.createObjectURL(swBlob);
-if('serviceWorker' in navigator) navigator.serviceWorker.register(swUrl);
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register(swUrl);
+  // Listen for messages from Service Worker (e.g. mark medicine taken from notification action)
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'MARK_TAKEN' && e.data.medName) {
+      markTakenFromAlert(e.data.medName);
+      showAlert('\u2705 ' + e.data.medName + ' marked as taken from notification!', 4000);
+    }
+  });
+}
 
 /* ══════════════════════════════════════════
    STATE
@@ -874,13 +899,22 @@ function playAlertSound(loop = false) {
   }
   beep();
   if (loop) {
-    _alertSoundInterval = setInterval(beep, 3500);
-    setTimeout(stopAlertSound, 90000);
+    _alertSoundInterval = setInterval(beep, 2500);
+    // Auto-stop after 60 seconds (1 full minute)
+    setTimeout(stopAlertSound, 60000);
   }
 }
 
 function stopAlertSound() {
   if (_alertSoundInterval) { clearInterval(_alertSoundInterval); _alertSoundInterval = null; }
+  // Disconnect shared context destination to stop any in-progress oscillators
+  try {
+    if (_sharedAudioCtx && _sharedAudioCtx.state !== 'closed') {
+      _sharedAudioCtx.close();
+      _sharedAudioCtx = null;
+      _audioUnlocked = false;
+    }
+  } catch(e) {}
 }
 function fireReminder(medName, dosage) {
   // 1. Web Audio in-app sound
@@ -893,30 +927,38 @@ function fireReminder(medName, dosage) {
 
 function sendSystemNotification(medName, dosage) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  const title = '\xf0\x9f\x92\x8a Medicine Time!';
-  const body = 'Take ' + medName + (dosage ? ' \xe2\x80\x94 ' + dosage : '') + '. Tap to open app.';
-  const iconSvg = '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"100\" height=\"100\" rx=\"20\" fill=\"#070D1A\"/><text y=\".85em\" font-size=\"75\" text-anchor=\"middle\" x=\"50\">\xf0\x9f\x92\x8a</text></svg>';
-  const iconUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg);
+  const title = '💊 Medicine Time!';
+  const body = 'Take ' + medName + (dosage ? ' — ' + dosage : '') + '. Tap to open the app.';
+  // Use a simple PNG-compatible data URL icon that works across all browsers
+  const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAAA';
   const opts = {
-    body, icon: iconUrl, badge: iconUrl,
-    tag: 'medbill-' + medName.replace(/\s+/g, '_'),
-    requireInteraction: true, silent: false,
-    vibrate: [400, 150, 400, 150, 600],
-    data: { medName, dosage, url: window.location.href }
+    body,
+    tag: 'medbill-' + medName.replace(/[^a-zA-Z0-9]/g, '_'),
+    requireInteraction: true,
+    silent: false,
+    vibrate: [500, 200, 500, 200, 800],
+    data: { medName, dosage, url: window.location.href },
+    actions: [
+      { action: 'taken', title: '✅ Mark Taken' },
+      { action: 'dismiss', title: '✖ Dismiss' }
+    ]
   };
-  // Prefer Service Worker notification (works in background on Android)
-  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.ready.then(reg => {
-      reg.showNotification(title, opts).catch(() => {
-        try { new Notification(title, opts); } catch(e) {}
-      });
-    }).catch(() => {
-      try { new Notification(title, opts); } catch(e) {}
-    });
-  } else {
-    try { const n = new Notification(title, opts); n.onclick = () => { window.focus(); n.close(); }; }
-    catch(e) {}
-  }
+  // Try Service Worker first (needed for background notifications on Android/Chrome)
+  const trySW = () => {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      return navigator.serviceWorker.ready.then(reg => reg.showNotification(title, opts));
+    }
+    return Promise.reject('no-sw');
+  };
+  // Fallback to direct Notification API
+  const tryDirect = () => {
+    try {
+      const n = new Notification(title, { body: opts.body, tag: opts.tag, requireInteraction: true, silent: false });
+      n.onclick = () => { try { window.focus(); } catch(e) {} n.close(); };
+      setTimeout(() => { try { n.close(); } catch(e) {} }, 90000);
+    } catch(e) { console.warn('Notification failed:', e.message); }
+  };
+  trySW().catch(tryDirect);
 }
 // Active medicine alert elements (so we can remove them)
 let _activeAlerts = {};
@@ -2068,7 +2110,7 @@ function renderCalendarTab() {
 
   const histSlice = (_showCalHistory === 'all') ? historyDays : historyDays.slice(-14);
 
-  c.innerHTML = '<div class="fadeUp">'
+  let html = '<div class="fadeUp">'
 
   // Family leaderboard (only if >1 profile with medicines)
   const leaderboardHtml = familyStreaks.length > 1 ? (
@@ -2093,7 +2135,8 @@ function renderCalendarTab() {
   ) : '';
 
   // Today summary
-  + '<div style="background:'+(allDone?'var(--adim)':'var(--card)')+';border:1px solid '+(allDone?'var(--aborder)':'var(--border)')+';border-radius:16px;padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:14px">'
+  html += leaderboardHtml;
+  html += '<div style="background:'+(allDone?'var(--adim)':'var(--card)')+';border:1px solid '+(allDone?'var(--aborder)':'var(--border)')+';border-radius:16px;padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:14px">'
   +   '<div style="font-size:36px">'+(allDone?'\uD83C\uDF89':'\uD83D\uDC8A')+'</div>'
   +   '<div style="flex:1">'
   +     '<div style="font-size:15px;font-weight:800;color:var(--text)">'+(allDone?'All medicines taken!':'Today\'s Progress')+'</div>'
@@ -2104,26 +2147,26 @@ function renderCalendarTab() {
   +     '<div style="font-size:26px;font-weight:900;color:var(--accent)">'+Math.round(takenToday/Math.max(totalToday,1)*100)+'%</div>'
   +     '<div style="font-size:10px;color:var(--muted)">today</div>'
   +   '</div>'
-  + '</div>'
+  html += '</div>'
 
   // Upcoming table
   + leaderboardHtml
-  + '<div class="sec-label">\uD83D\uDCC5 Today & Upcoming (7 Days)</div>'
-  + '<div class="card" style="padding:12px;margin-bottom:12px">'
+  html += '<div class="sec-label">\uD83D\uDCC5 Today & Upcoming (7 Days)</div>'
+  html += '<div class="card" style="padding:12px;margin-bottom:12px">'
   +   '<div style="display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--muted)">'
   +     '<span style="color:var(--accent)">\u2713 Taken</span>'
   +     '<span style="color:var(--gold)">\u25CB Today</span>'
   +     '<span>&#45;&#45; Upcoming</span>'
   +   '</div>'
   +   buildCalTable(upcomingDays)
-  + '</div>'
+  html += '</div>'
 
   // History toggle button
-  + '<button onclick="_showCalHistory=!_showCalHistory;renderCalendarTab()" style="width:100%;background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:12px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:12px;cursor:pointer">'
+  html += '<button onclick="_showCalHistory=!_showCalHistory;renderCalendarTab()" style="width:100%;background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:12px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:12px;cursor:pointer">'
   +   '\uD83D\uDCCB '+(_showCalHistory?'Hide':'View')+' History (Past 30 Days) '+(_showCalHistory?'\u25B2':'\u25BC')
-  + '</button>'
+  html += '</button>'
 
-  + (_showCalHistory
+  html += (_showCalHistory
     ? '<div class="card" style="padding:12px;margin-bottom:12px">'
     +   '<div style="display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--muted)">'
     +     '<span style="color:var(--accent)">\u2713 Taken</span>'
@@ -2134,8 +2177,9 @@ function renderCalendarTab() {
     + '</div>'
     : '')
 
-  + '<div style="font-size:11px;color:var(--muted);text-align:center;padding-bottom:8px">Tap circle to mark taken \u00B7 Tap \u2713 to undo</div>'
-  + '</div>';
+  html += '<div style="font-size:11px;color:var(--muted);text-align:center;padding-bottom:8px">Tap circle to mark taken \u00B7 Tap \u2713 to undo</div>';
+  html += '</div>';
+  c.innerHTML = html;
 }
 
 function toggleTaken(medName, dateKey) {
